@@ -5,16 +5,20 @@ import time
 import logging
 from datetime import datetime, timedelta
 from dataclasses import dataclass
-from src.plugin_system import (
+from src.plugin_system.base import (
     BasePlugin,
-    register_plugin,
     BaseAction,
     BaseTool,
+    ToolParamType,
+    ConfigField
+)
+from src.plugin_system.apis import register_plugin
+from src.plugin_system.base.component_types import (
     ComponentInfo,
     ActionInfo,
     ActionActivationType,
-    ConfigField,
-    ToolParamType
+    ComponentType,
+    ToolInfo
 )
 
 # 设置日志
@@ -235,6 +239,9 @@ class HLTVAPIClient:
         return await self._make_request(f"match.json?id={match_id}", cache_duration=60)
 
 
+# API基础URL常量
+HLTV_API_BASE = "https://hltv-api.vercel.app/api"
+
 # 全局HLTV客户端实例和事件检测器
 hltv_client = HLTVAPIClient()
 match_event_detector = MatchEventDetector()
@@ -438,7 +445,67 @@ class GetLiveMatchStatusTool(BaseTool):
         ("include_upcoming", ToolParamType.BOOLEAN, "是否包含即将开始的比赛", False, True),
         ("max_matches", ToolParamType.INTEGER, "返回最大比赛数量", False, 10),
     ]
-{{ ... }}
+    
+    async def execute(self, function_args: dict[str, Any]) -> dict[str, Any]:
+        """执行实时比赛状态查询"""
+        match_keywords = function_args.get("match_keywords", "").strip()
+        include_upcoming = function_args.get("include_upcoming", True)
+        max_matches = function_args.get("max_matches", 10)
+        
+        try:
+            # 获取实时比赛数据
+            matches_data = await self._fetch_live_matches(match_keywords, include_upcoming, max_matches)
+            return {"name": self.name, "content": matches_data}
+        except Exception as e:
+            logger.error(f"获取实时比赛状态失败: {e}")
+            return {"name": self.name, "content": "获取实时比赛状态失败"}
+    
+    async def _fetch_live_matches(self, keywords: str, include_upcoming: bool, max_matches: int) -> str:
+        """获取实时比赛数据"""
+        try:
+            # 获取实时比赛
+            live_url = f"{hltv_client.base_url}/matches"
+            params = {"live": "true"}
+            
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+                async with session.get(live_url, params=params) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        matches = data.get("matches", [])
+                        
+                        # 过滤关键词
+                        if keywords:
+                            filtered_matches = []
+                            for match in matches:
+                                team1 = match.get("team1", {}).get("name", "").lower()
+                                team2 = match.get("team2", {}).get("name", "").lower()
+                                event = match.get("event", {}).get("name", "").lower()
+                                if keywords.lower() in team1 or keywords.lower() in team2 or keywords.lower() in event:
+                                    filtered_matches.append(match)
+                            matches = filtered_matches
+                        
+                        # 限制数量
+                        matches = matches[:max_matches]
+                        
+                        if not matches:
+                            return "当前没有进行中的比赛"
+                        
+                        # 格式化输出
+                        result = []
+                        for match in matches:
+                            team1_name = match.get("team1", {}).get("name", "未知")
+                            team2_name = match.get("team2", {}).get("name", "未知")
+                            event_name = match.get("event", {}).get("name", "未知赛事")
+                            status = match.get("status", "未知状态")
+                            
+                            result.append(f"{team1_name} vs {team2_name} - {event_name} ({status})")
+                        
+                        return "\n".join(result)
+                    else:
+                        return "无法获取比赛数据"
+        except Exception as e:
+            logger.error(f"获取实时比赛数据失败: {e}")
+            return "获取比赛数据时发生错误"
 
 class GetPlayerInfoTool(BaseTool):
     """获取选手信息工具"""
@@ -451,7 +518,6 @@ class GetPlayerInfoTool(BaseTool):
         ("include_achievements", ToolParamType.BOOLEAN, "是否包含选手成就", False, False),
     ]
     
-{{ ... }}
     async def execute(self, function_args: dict[str, Any]) -> dict[str, Any]:
         """执行选手信息查询"""
         player_name = function_args.get("player_name", "").strip()
@@ -578,6 +644,101 @@ class GetTeamInfoTool(BaseTool):
             return {"name": self.name, "content": f"查询战队信息时出错: {str(e)}"}
 
 
+class GetMatchInfoTool(BaseTool):
+    """获取比赛信息工具"""
+    
+    name = "get_match_info"
+    description = "当用户询问、谈论到特定比赛的信息、结果、详情时使用。可查询比赛的基本信息、比分、时间等"
+    parameters = [
+        ("match_keywords", ToolParamType.STRING, "比赛关键词（战队名称、赛事名称等）", True, None),
+        ("include_results", ToolParamType.BOOLEAN, "是否包含比赛结果", False, True),
+        ("max_matches", ToolParamType.INTEGER, "返回最大比赛数量", False, 5),
+    ]
+    
+    @staticmethod
+    def get_tool_info():
+        return ToolInfo(
+            name="get_match_info",
+            description="当用户询问、谈论到特定比赛的信息、结果、详情时使用。可查询比赛的基本信息、比分、时间等",
+            component_type=ComponentType.TOOL,
+            tool_parameters=[
+                ("match_keywords", ToolParamType.STRING, "比赛关键词（战队名称、赛事名称等）", True, None),
+                ("include_results", ToolParamType.BOOLEAN, "是否包含比赛结果", False, True),
+                ("max_matches", ToolParamType.INTEGER, "返回最大比赛数量", False, 5),
+            ]
+        )
+    
+    async def execute(self, function_args: dict[str, Any]) -> dict[str, Any]:
+        """执行比赛信息查询"""
+        match_keywords = function_args.get("match_keywords", "").strip()
+        include_results = function_args.get("include_results", True)
+        max_matches = function_args.get("max_matches", 5)
+        
+        if not match_keywords:
+            return {"name": self.name, "content": "请提供比赛关键词"}
+        
+        try:
+            # 获取比赛数据
+            matches_data = await self._fetch_match_info(match_keywords, include_results, max_matches)
+            return {"name": self.name, "content": matches_data}
+        except Exception as e:
+            logger.error(f"获取比赛信息失败: {e}")
+            return {"name": self.name, "content": "获取比赛信息失败"}
+    
+    async def _fetch_match_info(self, keywords: str, include_results: bool, max_matches: int) -> str:
+        """获取比赛信息数据"""
+        try:
+            # 获取比赛数据
+            matches_url = f"{hltv_client.base_url}/matches"
+            
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+                async with session.get(matches_url) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        matches = data.get("matches", [])
+                        
+                        # 过滤关键词
+                        filtered_matches = []
+                        for match in matches:
+                            team1 = match.get("team1", {}).get("name", "").lower()
+                            team2 = match.get("team2", {}).get("name", "").lower()
+                            event = match.get("event", {}).get("name", "").lower()
+                            if keywords.lower() in team1 or keywords.lower() in team2 or keywords.lower() in event:
+                                filtered_matches.append(match)
+                        
+                        # 限制数量
+                        filtered_matches = filtered_matches[:max_matches]
+                        
+                        if not filtered_matches:
+                            return "未找到相关比赛信息"
+                        
+                        # 格式化输出
+                        result = []
+                        for match in filtered_matches:
+                            team1_name = match.get("team1", {}).get("name", "未知")
+                            team2_name = match.get("team2", {}).get("name", "未知")
+                            event_name = match.get("event", {}).get("name", "未知赛事")
+                            date = match.get("date", "未知时间")
+                            
+                            match_info = f"{team1_name} vs {team2_name} - {event_name} ({date})"
+                            
+                            if include_results and "result" in match:
+                                result_info = match.get("result", {})
+                                if result_info:
+                                    score = result_info.get("score", "")
+                                    if score:
+                                        match_info += f" | 比分: {score}"
+                            
+                            result.append(match_info)
+                        
+                        return "\n".join(result)
+                    else:
+                        return "无法获取比赛数据"
+        except Exception as e:
+            logger.error(f"获取比赛信息失败: {e}")
+            return "获取比赛数据时发生错误"
+
+
 class DetectMatchEventsTool(BaseTool):
     """检测比赛事件工具 - 识别比分变化、重要时刻等"""
     
@@ -671,6 +832,48 @@ class MatchEventNotificationAction(BaseAction):
             return False, f"事件检测失败: {str(e)}"
 
 
+class LiveMatchDiscussionAction(BaseAction):
+    """实时比赛讨论检测（仅记录模式）"""
+    
+    name = "live_match_discussion"
+    description = "检测用户对实时比赛的讨论，仅用于上下文分析"
+    activation_type = ActionActivationType.NEVER
+    
+    @staticmethod
+    def get_action_info() -> ActionInfo:
+        return ActionInfo(
+            name="live_match_discussion",
+            description="检测用户对实时比赛的讨论，仅用于上下文分析",
+            component_type=ComponentType.ACTION,
+            activation_type=ActionActivationType.NEVER
+        )
+    
+    async def execute(self, context: dict) -> tuple[bool, str]:
+        """仅记录，不执行任何操作"""
+        return True, "比赛讨论检测完成"
+
+
+class LiveMatchMonitorAction(BaseAction):
+    """实时比赛监控状态记录（仅记录模式）"""
+    
+    name = "live_match_monitor"
+    description = "监控实时比赛状态变化，仅用于上下文分析"
+    activation_type = ActionActivationType.NEVER
+    
+    @staticmethod
+    def get_action_info() -> ActionInfo:
+        return ActionInfo(
+            name="live_match_monitor",
+            description="监控实时比赛状态变化，仅用于上下文分析",
+            component_type=ComponentType.ACTION,
+            activation_type=ActionActivationType.NEVER
+        )
+    
+    async def execute(self, context: dict) -> tuple[bool, str]:
+        """仅记录，不执行任何操作"""
+        return True, "比赛监控状态记录完成"
+
+
 @register_plugin
 class CS2HLTVPlugin(BasePlugin):
     """CS2/CSGO HLTV信息插件"""
@@ -680,6 +883,10 @@ class CS2HLTVPlugin(BasePlugin):
     dependencies = []
     python_dependencies = ["aiohttp"]
     config_file_name = "config.toml"
+    
+    def __init__(self, plugin_dir: str):
+        """初始化CS2 HLTV插件"""
+        super().__init__(plugin_dir)
     
     config_section_descriptions = {
         "plugin": "插件基本配置",
