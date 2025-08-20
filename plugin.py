@@ -251,7 +251,7 @@ class GetCS2ContextInfoTool(BaseTool):
     """智能上下文信息提取工具 - 根据关键词自动查询相关信息"""
     
     name = "get_cs2_context_info"
-    description = "当用户提到、谈论到CS2/CSGO相关内容时，使用此工具自动查询相关选手、战队和比赛信息。适用于一般性CS2讨论、选手提及、战队讨论等场景"
+    description = "当用户提到、谈论到CS2/CSGO相关内容时，使用此工具自动查询相关选手、战队和比赛信息。当检测到CS游戏术语（如：eco、强起、长枪局、半甲、全甲、A点、B点、中路、rush、保枪、翻盘、闪、烟、雷、火、拆包、下包、残局、1vX等）时，自动提供相关上下文信息。适用于一般性CS2讨论、选手提及、战队讨论等场景"
     parameters = [
         ("context_keywords", ToolParamType.STRING, "从聊天上下文中提取的关键词（选手名、战队名、赛事名等）", True, None),
         ("query_type", ToolParamType.STRING, "查询类型：player（选手）、team（战队）、match（比赛）、auto（自动判断）", False, "auto"),
@@ -439,7 +439,7 @@ class GetLiveMatchStatusTool(BaseTool):
     """获取进行中比赛的实时状态工具"""
     
     name = "get_live_match_status"
-    description = "当用户询问、谈论到实时比赛情况、正在进行的比赛、今天的比赛或即将开始的比赛时使用。可根据战队名称过滤特定比赛"
+    description = "当用户询问、谈论到实时比赛情况、正在进行的比赛、今天的比赛或即将开始的比赛时使用。当检测到CS游戏术语（如：eco、强起、长枪局、半甲、全甲、A点、B点、中路、rush、保枪、翻盘、闪光弹、烟雾弹、手雷、燃烧弹、拆包、下包、残局、1vX、AWP、AK、M4、沙鹰、格洛克、USP等）时，自动查询当前是否有比赛正在进行。可根据战队名称过滤特定比赛"
     parameters = [
         ("match_keywords", ToolParamType.STRING, "比赛关键词（战队名称、赛事名称等）", False, ""),
         ("include_upcoming", ToolParamType.BOOLEAN, "是否包含即将开始的比赛", False, True),
