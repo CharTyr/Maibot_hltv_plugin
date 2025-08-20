@@ -651,22 +651,9 @@ class GetMatchInfoTool(BaseTool):
     description = "当用户询问、谈论到特定比赛的信息、结果、详情时使用。可查询比赛的基本信息、比分、时间等"
     parameters = [
         ("match_keywords", ToolParamType.STRING, "比赛关键词（战队名称、赛事名称等）", True, None),
-        ("include_results", ToolParamType.BOOLEAN, "是否包含比赛结果", False, True),
-        ("max_matches", ToolParamType.INTEGER, "返回最大比赛数量", False, 5),
+        ("include_results", ToolParamType.BOOLEAN, "是否包含比赛结果", False, [True,False]),
+        ("max_matches", ToolParamType.INTEGER, "返回最大比赛数量", False, None),
     ]
-    
-    @staticmethod
-    def get_tool_info():
-        return ToolInfo(
-            name="get_match_info",
-            description="当用户询问、谈论到特定比赛的信息、结果、详情时使用。可查询比赛的基本信息、比分、时间等",
-            component_type=ComponentType.TOOL,
-            tool_parameters=[
-                ("match_keywords", ToolParamType.STRING, "比赛关键词（战队名称、赛事名称等）", True, None),
-                ("include_results", ToolParamType.BOOLEAN, "是否包含比赛结果", False, True),
-                ("max_matches", ToolParamType.INTEGER, "返回最大比赛数量", False, 5),
-            ]
-        )
     
     async def execute(self, function_args: dict[str, Any]) -> dict[str, Any]:
         """执行比赛信息查询"""
