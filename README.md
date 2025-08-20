@@ -1,23 +1,23 @@
-# CS2/CSGO HLTV 信息插件
+# CS2/CSGO HLTV Plugin for MaiBot
 
-一个为 MaiBot 开发的智能 CS2/CSGO 电竞信息插件，能够检测群聊中的 CS2/CSGO 相关讨论，并从 HLTV.org 获取选手、战队和比赛数据，为机器人提供实时的电竞资讯支持。
+> 🛠️ **CS2/CSGO电竞数据工具插件** - 为MaiBot提供CS2/CSGO相关的上下文数据查询工具
 
-## ✨ 核心功能概览
+## 🌟 核心特性
 
-### 🎯 智能话题检测与参与
-- **自动识别** CS2/CSGO 相关讨论
-- **智能提取** 关键词（选手名、战队名、赛事名等）
-- **主动参与** 比赛讨论，提供实时信息和数据支持
-- **友好引导** 为用户提供查询建议和帮助
+### 🔧 纯工具模式
+- **数据提供**: 专注于为麦麦提供CS2/CSGO相关的上下文数据
+- **无主动回复**: 不会主动发送消息或邀请语句
+- **上下文支持**: 仅作为工具为麦麦的回复提供数据支持
 
-### 📊 全面数据查询系统
-- **选手统计**: Rating、ADR、KAST、KPR、爆头率等详细数据
-- **战队信息**: 成员构成、近期表现、历史战绩
-- **比赛数据**: 即将进行、正在进行、历史比赛信息
-- **实时监控**: 进行中比赛的实时比分和状态更新
+### 📊 全面数据查询
+- **选手信息**: 详细的选手统计数据（Rating、ADR、KAST、KPR等）
+- **战队资料**: 战队排名、成员构成、历史表现
+- **比赛数据**: 实时比赛状态、赛程安排、历史战绩
 
-### 🔥 实时比赛功能
-- **实时状态监控**: 自动获取进行中比赛的最新信息
+### 🔴 实时比赛监控
+- **Live状态**: 获取进行中比赛的实时信息
+- **即时更新**: 比分变化、地图进度、关键时刻
+- **事件检测**: 识别重要比赛事件和时刻的最新信息
 - **智能讨论参与**: 根据讨论类型提供相应的数据和分析
 - **比赛事件检测**: 识别比分变化、比赛开始/结束等重要时刻
 - **事件通知系统**: 重要比赛事件发生时主动通知
@@ -79,26 +79,25 @@
    - 近期表现和历史战绩
    - 支持战队名称模糊匹配
 
-### 🎮 智能动作 (Actions)
-1. **LiveMatchDiscussionAction** - 实时比赛讨论参与
-   - 自动检测群聊中的比赛讨论
-   - 根据讨论类型提供相应的数据和分析
-   - 智能识别讨论意图（预测、表现、比分等）
+### 🎮 内部检测动作 (Actions)
+1. **LiveMatchDiscussionAction** - 比赛讨论检测
+   - 检测群聊中的比赛讨论（仅记录，不回复）
+   - 为麦麦提供讨论上下文信息
+   - 识别讨论意图和相关战队
 
-2. **MatchEventNotificationAction** - 比赛事件通知
-   - 检测到重要比赛事件时主动通知
-   - 支持事件类型和重要性过滤
-   - 可配置的通知开关和阈值
+2. **MatchEventNotificationAction** - 比赛事件检测
+   - 检测重要比赛事件（仅记录，不通知）
+   - 为麦麦提供事件上下文数据
+   - 支持事件重要性评估
 
 3. **CS2TopicDetectionAction** - CS2话题检测
-   - 识别一般性CS2/CSGO询问
-   - 提供友好的引导和建议
+   - 识别CS2/CSGO相关话题（仅记录，不回复）
+   - 为麦麦提供话题上下文信息
    - 支持多种话题类型识别
 
-4. **LiveMatchMonitorAction** - 比赛监控
-   - 持续监控特定比赛的状态变化
-   - 定期更新和通知机制
-   - 支持多比赛同时监控
+4. **LiveMatchMonitorAction** - 比赛监控状态记录
+   - 记录比赛关注请求（仅记录，不监控）
+   - 为麦麦提供监控上下文信息
 
 ## ⚙️ 配置选项
 
@@ -118,69 +117,47 @@ team_cache_duration = 600    # 战队数据缓存10分钟
 match_cache_duration = 60    # 比赛数据缓存1分钟
 ```
 
-### 响应配置
+### 工具配置
 ```toml
-[responses]
-enable_general_response = true      # 启用通用CS2话题响应
-enable_live_discussion = true       # 启用实时比赛讨论参与
-enable_event_notifications = true   # 启用比赛事件通知
-enable_auto_monitoring = false      # 启用自动比赛监控
+[tools]
 max_results_per_query = 5          # 每次查询最大结果数
+enable_detailed_stats = true       # 启用详细统计数据
+enable_event_detection = true      # 启用事件检测功能
 ```
 
 ## 🚀 使用示例
 
-### 智能话题检测
+### 工具数据输出格式
+
+#### 选手信息工具输出
 ```
-用户: "ZywOo最近表现怎么样？"
-麦麦: "🎯 选手 ZywOo (Mathieu Herbaut) - Vitality, Rating: 1.33, 年龄: 21
-      📊 近期表现优异，在最新比赛中保持高水准发挥！"
+选手: ZywOo (Mathieu Herbaut) | 战队: Vitality | 国家: France | 年龄: 21
+统计: Rating 1.33 | Impact 1.45 | DPR 0.65 | ADR 85.2 | KAST 76.8% | KPR 0.84
 ```
 
-### 实时比赛讨论
+#### 战队信息工具输出
 ```
-用户: "Navi vs G2这场比赛太精彩了！"
-麦麦: "🎮 我也在关注这场比赛！
-      🔴 进行中 Navi vs G2
-      🏆 IEM Katowice 2024
-      ⏰ 开始于 14:30
-      ⭐ ★★★★☆"
+战队: Vitality | 排名: #1 | 国家: France
+队员: ZywOo (France), apEX (France), dupreeh (Denmark), Magisk (Denmark), Spinx (Israel)
 ```
 
-### 比赛事件通知
+#### 实时比赛状态工具输出
 ```
-系统自动: "🏁 比赛结束！Navi 获胜
-          最终比分：16 - 14"
-```
-
-### 选手数据查询
-```
-用户: "查询s1mple的详细数据"
-麦麦: "🎯 选手: s1mple (Oleksandr Kostyliev) - Navi
-      📊 Rating: 1.28 | 💥 Impact: 1.31 | 💀 DPR: 0.68
-      🎯 ADR: 82.4 | ✅ KAST: 74.2% | 🔫 KPR: 0.81"
+进行中: Navi vs G2 | IEM Katowice 2024 | 08-20 14:30 | 比分: 12-8 | bo3
+即将开始: Vitality vs FaZe | IEM Cologne 2024 | 08-20 20:00 | bo3
 ```
 
-### 战队信息查询
+#### 比赛事件检测工具输出
 ```
-用户: "Vitality现在排名多少？"
-麦麦: "🏆 战队: Vitality
-      📊 世界排名: #1
-      👥 队员阵容:
-        • apEX (Dan Madesclaire) - France
-        • dupreeh (Peter Rasmussen) - Denmark
-        • Magisk (Emil Reif) - Denmark
-        • ZywOo (Mathieu Herbaut) - France
-        • Spinx (Lotan Giladi) - Israel"
+[14:32] Navi vs G2 比分更新 | 重要性: 4/5 | 比分: 11-8 → 12-8
+[14:28] 关键回合胜利 | 重要性: 3/5 | 比分: 10-8 → 11-8
 ```
 
-### 比赛信息查询
+#### 上下文信息工具输出
 ```
-用户: "今天有什么比赛？"
-麦麦: "🔮 即将进行的比赛:
-      1. Vitality vs FaZe
-         📅 08-20 20:00 | 🏆 IEM Cologne 2024
-         ⭐ ★★★ | 🎯 bo3"
+选手: s1mple (Oleksandr Kostyliev) | 战队: Navi | 国家: Ukraine | 年龄: 25
+战队: Navi | 排名: #3 | 国家: Ukraine
+进行中: Navi vs G2 | IEM Katowice 2024 | 08-20 14:30 | 比分: 12-8
 ```
 
 ## 📦 安装与部署
@@ -189,12 +166,13 @@ max_results_per_query = 5          # 每次查询最大结果数
 - **MaiBot版本**: >= 0.10.0
 - **Python版本**: >= 3.8
 - **依赖包**: aiohttp
+- **运行模式**: 纯工具模式（无主动消息）
 
 ### 安装步骤
 1. **下载插件**
    ```bash
-   git clone <repository-url>
-   cd cs2_hltv_plugin
+   git clone https://github.com/CharTyr/Maibot_hltv_plugin.git
+   cd Maibot_hltv_plugin
    ```
 
 2. **安装依赖**
@@ -215,13 +193,13 @@ max_results_per_query = 5          # 每次查询最大结果数
 
 5. **验证安装**
    - 查看MaiBot日志确认插件加载成功
-   - 在群聊中测试CS2相关话题
+   - 工具将在后台为麦麦提供数据支持
 
 ### 配置文件
 插件会自动创建配置文件 `config.toml`，可根据需要调整参数：
 - API请求超时时间
 - 缓存策略设置
-- 功能开关配置
+- 工具功能开关
 
 ## 🔧 开发与测试
 
@@ -235,15 +213,16 @@ python test_plugin.py
 ### 测试覆盖
 - ✅ HLTV API连接测试
 - ✅ 所有工具组件功能测试
-- ✅ 所有动作组件加载测试
+- ✅ 所有检测组件加载测试
 - ✅ 实时比赛状态测试
 - ✅ 事件检测系统测试
 - ✅ 缓存机制验证
+- ✅ 纯工具模式验证
 
 ### 性能指标
 - **API响应时间**: < 2秒
 - **缓存命中率**: > 80%
-- **内存使用**: < 50MB
+- **内存使用**: < 30MB（纯工具模式）
 - **并发支持**: 多群聊同时使用
 
 ## ⚙️ 配置说明

@@ -241,10 +241,10 @@ match_event_detector = MatchEventDetector()
 
 
 class GetCS2ContextInfoTool(BaseTool):
-    """智能获取CS2/CSGO上下文信息工具 - 根据聊天内容自动查询相关信息供麦麦参考"""
+    """智能上下文信息提取工具 - 根据关键词自动查询相关信息"""
     
     name = "get_cs2_context_info"
-    description = "根据聊天上下文中提到的CS2/CSGO相关内容，自动查询选手、战队、比赛等信息作为回复参考"
+    description = "当用户提到、谈论到CS2/CSGO相关内容时，使用此工具自动查询相关选手、战队和比赛信息。适用于一般性CS2讨论、选手提及、战队讨论等场景"
     parameters = [
         ("context_keywords", ToolParamType.STRING, "从聊天上下文中提取的关键词（选手名、战队名、赛事名等）", True, None),
         ("query_type", ToolParamType.STRING, "查询类型：player（选手）、team（战队）、match（比赛）、auto（自动判断）", False, "auto"),
@@ -281,11 +281,11 @@ class GetCS2ContextInfoTool(BaseTool):
                     context_info.extend(match_info)
             
             if context_info:
-                result = "📊 CS2/CSGO 相关信息参考:\n" + "\n".join(context_info)
+                result = "\n".join(context_info)
                 logger.info(f"为关键词 '{context_keywords}' 提供了上下文信息")
                 return {"name": self.name, "content": result}
             else:
-                return {"name": self.name, "content": f"未找到与 '{context_keywords}' 相关的CS2/CSGO信息"}
+                return {"name": self.name, "content": f"未找到与 '{context_keywords}' 相关的信息"}
                 
         except Exception as e:
             logger.error(f"获取CS2上下文信息时出错: {str(e)}")
@@ -368,7 +368,7 @@ class GetCS2ContextInfoTool(BaseTool):
             if not matches:
                 return []
             
-            # 处理不同的数据结构
+            # 处理数据结构
             if isinstance(matches, dict):
                 matches = [matches]
             elif not isinstance(matches, list):
@@ -420,293 +420,38 @@ class CS2TopicDetectionAction(BaseAction):
         """执行友好引导回复"""
         query_intent = self.action_data.get("query_intent", "")
         
-        if self.get_config("responses.enable_general_response", True):
-            message = ("🎮 我可以帮你查询CS2/CSGO的相关信息！\n"
-                      "你可以询问：\n"
-                      "• 特定选手的数据和统计\n"
-                      "• 战队排名和阵容信息\n" 
-                      "• 最近的比赛结果和安排\n"
-                      "直接提到选手名或战队名，我会自动为你查询相关信息～")
-            
-            await self.send_text(message)
-            return True, "提供了CS2/CSGO信息查询引导"
-        
-        return False, "通用响应已禁用"
+        try:
+            logger.info(f"检测到CS2相关话题，可供上下文分析使用")
+            return True, "CS2话题检测完成"
+        except Exception as e:
+            logger.error(f"CS2话题检测执行出错: {str(e)}")
+            return False, f"话题检测失败: {str(e)}"
 
 
 class GetLiveMatchStatusTool(BaseTool):
     """获取进行中比赛的实时状态工具"""
     
     name = "get_live_match_status"
-    description = "获取当前正在进行或即将开始的比赛实时状态和详细信息"
+    description = "当用户询问、谈论到实时比赛情况、正在进行的比赛、今天的比赛或即将开始的比赛时使用。可根据战队名称过滤特定比赛"
     parameters = [
         ("match_keywords", ToolParamType.STRING, "比赛关键词（战队名称、赛事名称等）", False, ""),
         ("include_upcoming", ToolParamType.BOOLEAN, "是否包含即将开始的比赛", False, True),
-        ("max_matches", ToolParamType.INTEGER, "返回最大比赛数量", False, 3),
+        ("max_matches", ToolParamType.INTEGER, "返回最大比赛数量", False, 10),
     ]
-    
-    async def execute(self, function_args: dict[str, Any]) -> dict[str, Any]:
-        """执行实时比赛状态查询"""
-        match_keywords = function_args.get("match_keywords", "").strip()
-        include_upcoming = function_args.get("include_upcoming", True)
-        max_matches = min(function_args.get("max_matches", 3), 5)
-        
-        try:
-            matches = await hltv_client.get_matches()
-            if not matches:
-                return {"name": self.name, "content": "无法获取比赛数据"}
-            
-            # 处理数据结构
-            if isinstance(matches, dict):
-                matches = [matches]
-            elif not isinstance(matches, list):
-                return {"name": self.name, "content": "比赛数据格式异常"}
-            
-            current_time = datetime.now()
-            relevant_matches = []
-            
-            for match in matches[:10]:  # 检查前10场比赛
-                teams = match.get('teams', [])
-                if len(teams) < 2:
-                    continue
-                
-                # 如果提供了关键词，进行匹配
-                if match_keywords:
-                    team_names = [team.get('name', '').lower() for team in teams]
-                    event_name = match.get('event', {}).get('name', '').lower()
-                    
-                    keyword_match = any(
-                        match_keywords.lower() in name or name in match_keywords.lower()
-                        for name in team_names + [event_name]
-                    )
-                    
-                    if not keyword_match:
-                        continue
-                
-                # 判断比赛时间状态
-                match_time_str = match.get('time', '')
-                if match_time_str:
-                    try:
-                        match_time = datetime.fromisoformat(match_time_str.replace('Z', '+00:00'))
-                        time_diff_minutes = (match_time.replace(tzinfo=None) - current_time).total_seconds() / 60
-                        
-                        # 正在进行：开始后2小时内
-                        # 即将开始：未来4小时内
-                        if -120 <= time_diff_minutes <= (240 if include_upcoming else 0):
-                            status = "🔴 进行中" if time_diff_minutes <= 0 else "🟡 即将开始"
-                            time_info = f"开始于 {match_time.strftime('%H:%M')}" if time_diff_minutes <= 0 else f"{abs(int(time_diff_minutes))}分钟后开始"
-                            
-                            match_info = {
-                                'match': match,
-                                'status': status,
-                                'time_info': time_info,
-                                'time_diff': time_diff_minutes
-                            }
-                            relevant_matches.append(match_info)
-                    except:
-                        continue
-            
-            if not relevant_matches:
-                return {"name": self.name, "content": "当前没有找到相关的进行中或即将开始的比赛"}
-            
-            # 按时间排序，进行中的优先
-            relevant_matches.sort(key=lambda x: (x['time_diff'] > 0, abs(x['time_diff'])))
-            
-            # 构建结果
-            result_parts = ["🎮 实时比赛状态:"]
-            
-            for i, match_info in enumerate(relevant_matches[:max_matches]):
-                match = match_info['match']
-                teams = match.get('teams', [])
-                
-                match_detail = (
-                    f"\n{match_info['status']} {teams[0].get('name', 'TBD')} vs {teams[1].get('name', 'TBD')}\n"
-                    f"🏆 {match.get('event', {}).get('name', '未知赛事')}\n"
-                    f"⏰ {match_info['time_info']}\n"
-                    f"⭐ {'★' * match.get('stars', 0) if match.get('stars', 0) > 0 else '无星级'}\n"
-                    f"🎯 {match.get('maps', 'TBD')}"
-                )
-                result_parts.append(match_detail)
-            
-            result = "\n".join(result_parts)
-            logger.info(f"获取了{len(relevant_matches)}场实时比赛信息")
-            return {"name": self.name, "content": result}
-            
-        except Exception as e:
-            logger.error(f"获取实时比赛状态出错: {str(e)}")
-            return {"name": self.name, "content": f"获取比赛状态时出错: {str(e)}"}
-
-
-class LiveMatchDiscussionAction(BaseAction):
-    """智能比赛讨论参与Action - 主动参与正在进行的比赛讨论"""
-    
-    action_name = "live_match_discussion"
-    action_description = "当检测到群聊正在讨论进行中的比赛时，主动参与讨论并提供实时信息"
-    activation_type = ActionActivationType.LLM_JUDGE
-    
-    activation_conditions = [
-        "群聊正在讨论某场正在进行的CS2/CSGO比赛",
-        "用户提到了正在直播的比赛或选手表现",
-        "讨论比赛进展、比分、精彩时刻等实时内容",
-        "群聊氛围显示大家在关注同一场比赛"
-    ]
-    
-    action_parameters = {
-        "discussed_teams": "正在讨论的战队名称列表",
-        "match_context": "比赛讨论的具体内容和上下文",
-        "discussion_type": "讨论类型：score(比分)、performance(表现)、prediction(预测)、general(一般讨论)"
-    }
-    
-    action_require = [
-        "当检测到群聊正在讨论进行中的比赛时使用",
-        "当群聊氛围显示大家在关注同一场比赛时使用",
-        "当需要为比赛讨论提供实时信息支持时使用"
-    ]
-    
-    associated_types = ["text"]
-    
-    async def execute(self) -> Tuple[bool, str]:
-        """执行智能比赛讨论参与"""
-        discussed_teams = self.action_data.get("discussed_teams", [])
-        match_context = self.action_data.get("match_context", "")
-        discussion_type = self.action_data.get("discussion_type", "general")
-        
-        if not self.get_config("responses.enable_live_discussion", True):
-            return False, "实时比赛讨论功能已禁用"
-        
-        try:
-            # 获取相关比赛信息
-            match_keywords = ", ".join(discussed_teams) if discussed_teams else ""
-            
-            # 使用实时比赛状态工具获取信息
-            live_tool = GetLiveMatchStatusTool()
-            match_result = await live_tool.execute({
-                "match_keywords": match_keywords,
-                "include_upcoming": False,  # 只关注进行中的比赛
-                "max_matches": 2
-            })
-            
-            match_info = match_result.get("content", "")
-            
-            if "当前没有找到相关" in match_info or "无法获取" in match_info:
-                # 没有找到相关比赛，提供一般性参与
-                if discussion_type == "prediction":
-                    message = "🎯 看起来大家在预测比赛结果！虽然我没有找到具体的实时数据，但可以帮大家查询战队历史表现和选手数据～"
-                elif discussion_type == "performance":
-                    message = "💪 讨论选手表现真有意思！需要我查询具体选手的统计数据吗？"
-                else:
-                    message = "🎮 看到大家在讨论比赛！虽然我暂时没有找到实时比赛数据，但如果需要查询选手或战队信息，随时告诉我～"
-            else:
-                # 找到了相关比赛，提供具体信息
-                response_parts = []
-                
-                if discussion_type == "score":
-                    response_parts.append("📊 我来提供一下这场比赛的最新信息：")
-                elif discussion_type == "performance":
-                    response_parts.append("🔥 关于选手表现，我找到了这场比赛的信息：")
-                elif discussion_type == "prediction":
-                    response_parts.append("🎯 基于当前比赛状态，我找到了相关信息：")
-                else:
-                    response_parts.append("🎮 我也在关注这场比赛！")
-                
-                # 简化比赛信息显示
-                simplified_info = match_info.replace("🎮 实时比赛状态:", "").strip()
-                response_parts.append(simplified_info)
-                
-                # 根据讨论类型添加互动内容
-                if discussion_type == "prediction":
-                    response_parts.append("\n🤔 大家觉得哪支战队会赢？我可以查询双方的历史交锋记录！")
-                elif discussion_type == "performance":
-                    response_parts.append("\n📈 想了解具体选手的详细数据吗？我可以提供Rating、ADR等统计信息！")
-                
-                message = "\n".join(response_parts)
-            
-            await self.send_text(message)
-            logger.info(f"参与了关于 {discussed_teams} 的比赛讨论")
-            return True, f"成功参与了{discussion_type}类型的比赛讨论"
-            
-        except Exception as e:
-            logger.error(f"参与比赛讨论时出错: {str(e)}")
-            return False, f"参与讨论失败: {str(e)}"
-
-
-class LiveMatchMonitorAction(BaseAction):
-    """实时比赛监控Action - 重构为更智能的监控"""
-    
-    action_name = "live_match_monitor"
-    action_description = "开启对特定比赛的持续监控，定期提供更新"
-    activation_type = ActionActivationType.LLM_JUDGE
-    
-    activation_conditions = [
-        "用户明确要求监控某场比赛",
-        "用户想要接收比赛的定期更新",
-        "群聊决定一起关注某场重要比赛"
-    ]
-    
-    action_parameters = {
-        "target_teams": "要监控的战队名称",
-        "monitor_duration": "监控持续时间(分钟)",
-        "update_interval": "更新间隔(分钟)"
-    }
-    
-    action_require = [
-        "当用户明确要求监控比赛时使用",
-        "当需要为群聊提供比赛定期更新时使用"
-    ]
-    
-    associated_types = ["text"]
-    
-    async def execute(self) -> Tuple[bool, str]:
-        """执行比赛监控设置"""
-        target_teams = self.action_data.get("target_teams", "")
-        monitor_duration = int(self.action_data.get("monitor_duration", 60))
-        update_interval = int(self.action_data.get("update_interval", 10))
-        
-        # 限制监控参数
-        monitor_duration = min(monitor_duration, 180)  # 最多3小时
-        update_interval = max(update_interval, 5)      # 最少5分钟间隔
-        
-        # 获取目标比赛
-        live_tool = GetLiveMatchStatusTool()
-        match_result = await live_tool.execute({
-            "match_keywords": target_teams,
-            "include_upcoming": True,
-            "max_matches": 1
-        })
-        
-        match_info = match_result.get("content", "")
-        
-        if "当前没有找到相关" in match_info:
-            await self.send_text(f"❌ 没有找到与 '{target_teams}' 相关的比赛。请检查战队名称或稍后再试。")
-            return False, "未找到目标比赛"
-        
-        # 设置监控
-        message = (
-            f"✅ 已开启比赛监控！\n"
-            f"🎯 监控目标: {target_teams}\n"
-            f"⏰ 监控时长: {monitor_duration}分钟\n"
-            f"🔄 更新间隔: {update_interval}分钟\n\n"
-            f"📊 当前状态:\n{match_info.replace('🎮 实时比赛状态:', '').strip()}\n\n"
-            f"💡 我会定期为大家更新比赛进展！"
-        )
-        
-        await self.send_text(message)
-        
-        # 这里可以添加定时任务逻辑，但需要插件系统支持
-        # 目前先返回成功状态
-        return True, f"开启了对{target_teams}的比赛监控"
-
+{{ ... }}
 
 class GetPlayerInfoTool(BaseTool):
     """获取选手信息工具"""
     
     name = "get_player_info"
-    description = "根据选手名称或ID获取详细的选手信息、统计数据和近期表现"
+    description = "当用户询问、谈论到特定选手的信息、数据、统计、表现或排名时使用。支持选手昵称和真实姓名查询，可获取Rating、ADR、KAST等详细统计"
     parameters = [
         ("player_name", ToolParamType.STRING, "选手昵称或真实姓名", True, None),
         ("include_stats", ToolParamType.BOOLEAN, "是否包含详细统计数据", False, True),
+        ("include_achievements", ToolParamType.BOOLEAN, "是否包含选手成就", False, False),
     ]
     
+{{ ... }}
     async def execute(self, function_args: dict[str, Any]) -> dict[str, Any]:
         """执行选手信息查询"""
         player_name = function_args.get("player_name", "").strip()
@@ -719,7 +464,7 @@ class GetPlayerInfoTool(BaseTool):
             # 获取选手列表
             players = await hltv_client.get_players()
             if not players:
-                return {"name": self.name, "content": "无法获取选手数据，请稍后再试"}
+                return {"name": self.name, "content": "无法获取选手数据"}
             
             # 查找匹配的选手
             found_player = None
@@ -734,32 +479,35 @@ class GetPlayerInfoTool(BaseTool):
                     break
             
             if not found_player:
-                return {
-                    "name": self.name, 
-                    "content": f"未找到选手 '{player_name}'。请检查拼写或尝试使用选手的游戏昵称。"
-                }
+                return {"name": self.name, "content": f"未找到选手 '{player_name}'"}
             
             # 构建选手信息
-            info_parts = [
-                f"🎯 选手: {found_player.get('nickname', 'N/A')} ({found_player.get('name', 'N/A')})",
-                f"🏆 战队: {found_player.get('team', {}).get('name', '自由选手')}",
-                f"🎂 年龄: {found_player.get('age', 'N/A')}岁"
-            ]
+            result_parts = []
             
-            if include_stats:
-                stats_parts = [
-                    f"📊 Rating: {found_player.get('rating', 'N/A')}",
-                    f"💥 Impact: {found_player.get('impact', 'N/A')}",
-                    f"💀 DPR: {found_player.get('dpr', 'N/A')}",
-                    f"🎯 ADR: {found_player.get('adr', 'N/A')}",
-                    f"✅ KAST: {found_player.get('kast', 'N/A')}%",
-                    f"🔫 KPR: {found_player.get('kpr', 'N/A')}",
-                    f"🎯 爆头率: {found_player.get('headshots', 'N/A')}%",
-                    f"🗺️ 比赛场数: {found_player.get('mapsPlayed', 'N/A')}"
-                ]
-                info_parts.extend(stats_parts)
+            # 基本信息
+            nickname = found_player.get('nickname', 'N/A')
+            fullname = found_player.get('name', 'N/A')
+            country = found_player.get('country', 'N/A')
+            team = found_player.get('team', 'N/A')
+            age = found_player.get('age', 'N/A')
             
-            result = "\n".join(info_parts)
+            basic_info = f"选手: {nickname} ({fullname}) | 战队: {team} | 国家: {country} | 年龄: {age}"
+            result_parts.append(basic_info)
+            
+            # 详细统计（如果可用且请求包含）
+            if include_stats and 'stats' in found_player:
+                stats = found_player['stats']
+                rating = stats.get('rating', 'N/A')
+                adr = stats.get('adr', 'N/A')
+                kast = stats.get('kast', 'N/A')
+                impact = stats.get('impact', 'N/A')
+                kpr = stats.get('kpr', 'N/A')
+                dpr = stats.get('dpr', 'N/A')
+                
+                stats_info = f"统计: Rating {rating} | Impact {impact} | DPR {dpr} | ADR {adr} | KAST {kast}% | KPR {kpr}"
+                result_parts.append(stats_info)
+            
+            result = "\n".join(result_parts)
             
             return {"name": self.name, "content": result}
             
@@ -771,7 +519,7 @@ class GetTeamInfoTool(BaseTool):
     """获取战队信息工具"""
     
     name = "get_team_info"
-    description = "根据战队名称获取战队排名、成员信息和近期表现"
+    description = "当用户询问、谈论到特定战队的信息、排名、成员阵容或表现时使用。支持战队名称模糊匹配，可获取世界排名、队员构成等信息"
     parameters = [
         ("team_name", ToolParamType.STRING, "战队名称", True, None),
         ("include_players", ToolParamType.BOOLEAN, "是否包含队员信息", False, True),
@@ -789,7 +537,7 @@ class GetTeamInfoTool(BaseTool):
             # 获取战队列表
             teams = await hltv_client.get_teams()
             if not teams:
-                return {"name": self.name, "content": "无法获取战队数据，请稍后再试"}
+                return {"name": self.name, "content": "无法获取战队数据"}
             
             # 查找匹配的战队
             found_team = None
@@ -799,27 +547,30 @@ class GetTeamInfoTool(BaseTool):
                     break
             
             if not found_team:
-                return {
-                    "name": self.name,
-                    "content": f"未找到战队 '{team_name}'。请检查拼写或尝试使用战队的完整名称。"
-                }
+                return {"name": self.name, "content": f"未找到战队 '{team_name}'"}
             
             # 构建战队信息
-            info_parts = [
-                f"🏆 战队: {found_team.get('name', 'N/A')}",
-                f"📊 世界排名: #{found_team.get('ranking', 'N/A')}"
-            ]
+            result_parts = []
             
-            if include_players and 'players' in found_team:
-                info_parts.append("\n👥 队员阵容:")
+            # 基本信息
+            name = found_team.get('name', 'N/A')
+            country = found_team.get('country', 'N/A')
+            ranking = found_team.get('ranking', 'N/A')
+            
+            basic_info = f"战队: {name} | 排名: #{ranking} | 国家: {country}"
+            result_parts.append(basic_info)
+            
+            # 队员信息
+            if 'players' in found_team and found_team['players']:
+                players_list = []
                 for player in found_team['players']:
-                    country_flag = player.get('country', {}).get('name', '')
-                    info_parts.append(
-                        f"  • {player.get('nickname', 'N/A')} "
-                        f"({player.get('fullname', 'N/A')}) - {country_flag}"
-                    )
+                    player_name = player.get('nickname', player.get('name', 'Unknown'))
+                    player_country = player.get('country', 'N/A')
+                    players_list.append(f"{player_name} ({player_country})")
+                players_info = f"队员: {', '.join(players_list)}"
+                result_parts.append(players_info)
             
-            result = "\n".join(info_parts)
+            result = "\n".join(result_parts)
             
             return {"name": self.name, "content": result}
             
@@ -827,79 +578,11 @@ class GetTeamInfoTool(BaseTool):
             return {"name": self.name, "content": f"查询战队信息时出错: {str(e)}"}
 
 
-class GetMatchInfoTool(BaseTool):
-    """获取比赛信息工具"""
-    
-    name = "get_match_info"
-    description = "获取比赛信息、结果或即将进行的比赛安排"
-    parameters = [
-        ("query_type", ToolParamType.STRING, "查询类型: upcoming(即将进行), recent(最近结果), live(进行中)", True, "upcoming"),
-        ("limit", ToolParamType.INTEGER, "返回结果数量限制", False, 5),
-    ]
-    
-    async def execute(self, function_args: dict[str, Any]) -> dict[str, Any]:
-        """执行比赛信息查询"""
-        query_type = function_args.get("query_type", "upcoming").lower()
-        limit = min(function_args.get("limit", 5), 10)  # 最多10条
-        
-        try:
-            if query_type == "upcoming":
-                # 获取即将进行的比赛
-                matches = await hltv_client.get_matches()
-                if not matches:
-                    return {"name": self.name, "content": "无法获取比赛数据"}
-                
-                info_parts = ["🔮 即将进行的比赛:"]
-                for i, match in enumerate(matches[:limit]):
-                    teams = match.get('teams', [])
-                    if len(teams) >= 2:
-                        match_time = match.get('time', '')
-                        if match_time:
-                            try:
-                                dt = datetime.fromisoformat(match_time.replace('Z', '+00:00'))
-                                time_str = dt.strftime('%m-%d %H:%M')
-                            except:
-                                time_str = "时间待定"
-                        else:
-                            time_str = "时间待定"
-                        
-                        info_parts.append(
-                            f"{i+1}. {teams[0].get('name', 'TBD')} vs {teams[1].get('name', 'TBD')}\n"
-                            f"   📅 {time_str} | 🏆 {match.get('event', {}).get('name', '未知赛事')}\n"
-                            f"   ⭐ {'★' * match.get('stars', 0)} | 🎯 {match.get('maps', 'TBD')}"
-                        )
-            
-            elif query_type == "recent":
-                # 获取最近的比赛结果
-                results = await hltv_client.get_results()
-                if not results:
-                    return {"name": self.name, "content": "无法获取比赛结果"}
-                
-                info_parts = ["📊 最近比赛结果:"]
-                for i, result in enumerate(results[:limit]):
-                    teams = result.get('teams', [])
-                    if len(teams) >= 2:
-                        info_parts.append(
-                            f"{i+1}. {teams[0].get('name', 'TBD')} vs {teams[1].get('name', 'TBD')}\n"
-                            f"   🏆 {result.get('event', {}).get('name', '未知赛事')}\n"
-                            f"   📊 {result.get('result', {}).get('score', 'N/A')}"
-                        )
-            
-            else:
-                return {"name": self.name, "content": "查询类型无效，请使用: upcoming, recent, 或 live"}
-            
-            result = "\n\n".join(info_parts)
-            return {"name": self.name, "content": result}
-            
-        except Exception as e:
-            return {"name": self.name, "content": f"查询比赛信息时出错: {str(e)}"}
-
-
 class DetectMatchEventsTool(BaseTool):
     """检测比赛事件工具 - 识别比分变化、重要时刻等"""
     
     name = "detect_match_events"
-    description = "检测当前比赛的重要事件，如比分变化、比赛开始/结束等"
+    description = "当用户询问、谈论到CS比赛事件、比分变化、比赛亮点或重要时刻时使用。可检测比赛开始/结束、比分更新等事件，并按重要性评级"
     parameters = [
         ("importance_threshold", ToolParamType.INTEGER, "事件重要性阈值（1-5），只返回达到此重要性的事件", False, 3),
         ("time_window_minutes", ToolParamType.INTEGER, "检测时间窗口（分钟），只返回此时间内的事件", False, 30),
@@ -926,25 +609,15 @@ class DetectMatchEventsTool(BaseTool):
             important_events = [e for e in recent_events if e.importance >= importance_threshold]
             
             if not important_events:
-                return {"name": self.name, "content": f"最近{time_window_minutes}分钟内没有检测到重要性≥{importance_threshold}的比赛事件"}
+                return {"name": self.name, "content": "当前时间窗口内没有检测到重要比赛事件"}
             
-            result_parts = ["🚨 检测到重要比赛事件:"]
+            result_parts = []
             
-            for event in important_events[-5:]:  # 最多显示5个最近事件
-                event_emoji = {
-                    "score_change": "⚡",
-                    "match_start": "🟢", 
-                    "match_end": "🏁",
-                    "overtime": "🔥"
-                }.get(event.event_type, "📢")
-                
-                importance_stars = "★" * event.importance
+            for event in important_events:
+                # 时间格式化
                 time_str = event.timestamp.strftime("%H:%M")
                 
-                event_detail = (
-                    f"\n{event_emoji} [{time_str}] {event.description}\n"
-                    f"   重要性: {importance_stars} | 比分: {event.old_score[0]}-{event.old_score[1]} → {event.new_score[0]}-{event.new_score[1]}"
-                )
+                event_detail = f"[{time_str}] {event.description} | 重要性: {event.importance}/5 | 比分: {event.old_score[0]}-{event.old_score[1]} → {event.new_score[0]}-{event.new_score[1]}"
                 result_parts.append(event_detail)
             
             result = "\n".join(result_parts)
@@ -957,10 +630,10 @@ class DetectMatchEventsTool(BaseTool):
 
 
 class MatchEventNotificationAction(BaseAction):
-    """比赛事件通知Action - 当检测到重要事件时主动通知"""
+    """比赛事件检测记录（仅用于上下文分析）"""
     
     name = "match_event_notification"
-    description = "当检测到重要比赛事件时，主动向群聊发送通知"
+    description = "检测重要比赛事件并记录，提供上下文信息"
     activation_type = ActionActivationType.LLM_JUDGE
     
     @classmethod
@@ -971,13 +644,10 @@ class MatchEventNotificationAction(BaseAction):
             component_type=ComponentType.ACTION,
             description=cls.description,
             activation_type=cls.activation_type,
-            llm_judge_prompt="当检测到CS2/CSGO比赛中的重要事件（如比分变化、比赛结束等）时触发此动作"
+            llm_judge_prompt="当需要检测CS2/CSGO比赛事件时触发此动作"
         )
     
     async def execute(self) -> Tuple[bool, str]:
-        if not self.get_config("responses.enable_event_notifications", True):
-            return False, "比赛事件通知功能已禁用"
-        
         try:
             # 获取当前比赛数据并检测事件
             matches = await hltv_client.get_matches()
@@ -993,28 +663,12 @@ class MatchEventNotificationAction(BaseAction):
             # 过滤重要事件
             important_events = [e for e in events if e.importance >= 4]
             
-            if not important_events:
-                return False, "没有检测到需要通知的重要事件"
-            
-            # 发送通知
-            for event in important_events:
-                if event.event_type == "match_end":
-                    message = f"🏁 比赛结束！{event.description}\n最终比分：{event.new_score[0]} - {event.new_score[1]}"
-                elif event.event_type == "score_change" and event.importance >= 5:
-                    message = f"🔥 关键时刻！{event.team1} vs {event.team2}\n比分更新：{event.new_score[0]} - {event.new_score[1]}"
-                elif event.event_type == "match_start":
-                    message = f"🟢 比赛开始！{event.team1} vs {event.team2}"
-                else:
-                    message = f"⚡ {event.description}"
-                
-                await self.send_text(message)
-            
-            logger.info(f"发送了{len(important_events)}个比赛事件通知")
-            return True, f"成功发送{len(important_events)}个事件通知"
+            logger.info(f"检测到{len(important_events)}个重要比赛事件，可供上下文分析使用")
+            return True, f"比赛事件检测完成，发现{len(important_events)}个重要事件"
             
         except Exception as e:
-            logger.error(f"发送比赛事件通知时出错: {str(e)}")
-            return False, f"发送通知失败: {str(e)}"
+            logger.error(f"检测比赛事件时出错: {str(e)}")
+            return False, f"事件检测失败: {str(e)}"
 
 
 @register_plugin
