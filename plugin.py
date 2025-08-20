@@ -251,7 +251,17 @@ class GetCS2ContextInfoTool(BaseTool):
     """智能上下文信息提取工具 - 根据关键词自动查询相关信息"""
     
     name = "get_cs2_context_info"
-    description = "当用户提到、谈论到CS2/CSGO相关内容时，使用此工具自动查询相关选手、战队和比赛信息。当检测到CS游戏术语（如：eco、强起、长枪局、半甲、全甲、A点、B点、中路、rush、保枪、翻盘、闪、烟、雷、火、拆包、下包、残局、1vX等）时，自动提供相关上下文信息。适用于一般性CS2讨论、选手提及、战队讨论等场景"
+    description = (
+        "【优先使用】当话题明确涉及CS/CS2/CSGO电竞（赛事、战队、选手、比赛数据、战术术语）时，"
+        "优先调用本工具而非通用联网搜索。检测到以下CS术语时应触发：eco、强起、长枪局、半甲、全甲、A点、B点、"
+        "中路、rush、保枪、翻盘、闪、烟、雷、火、燃烧弹、拆包、下包、残局、1vX、AWP、AK、M4、沙鹰、格洛克、USP 等。"
+        "当用户泛泛讨论“CS比赛/选手/战队/赛事”或点名选手/战队时，使用本工具提供上下文汇总；"
+        "只有当问题与CS无关或需要跨站新闻/科普检索时才考虑通用联网搜索。"
+        "示例战队：Tyloo（天禄）、NAVI、FaZe、G2、Vitality（小蜜蜂）、Astralis（A队）、Liquid（液体）、Heroic、Fnatic、MOUZ、C9"
+        "示例选手：s1mple、ZywOo、NiKo、device、m0NESY、ropz、broky、electronic、donk、YEKINDAR。"
+        "示例赛事：Major、PGL Major、BLAST Premier、IEM 卡托维兹（Katowice）、IEM 科隆（Cologne）、ESL 职业联赛（EPL/Pro League）、IEM 达拉斯（Dallas）、Gamers8、Copenhagen Major。"
+    )
+    available_for_llm = True
     parameters = [
         ("context_keywords", ToolParamType.STRING, "从聊天上下文中提取的关键词（选手名、战队名、赛事名等）", True, None),
         ("query_type", ToolParamType.STRING, "查询类型：player（选手）、team（战队）、match（比赛）、auto（自动判断）", False, "auto"),
@@ -439,7 +449,13 @@ class GetLiveMatchStatusTool(BaseTool):
     """获取进行中比赛的实时状态工具"""
     
     name = "get_live_match_status"
-    description = "当用户询问、谈论到实时比赛情况、正在进行的比赛、今天的比赛或即将开始的比赛时使用。当检测到CS游戏术语（如：eco、强起、长枪局、半甲、全甲、A点、B点、中路、rush、保枪、翻盘、闪、烟、雷、火、燃烧弹、拆包、下包、残局、1vX、AWP、AK、M4、沙鹰、格洛克、USP等）时，自动查询当前是否有比赛正在进行。可根据战队名称过滤特定比赛"
+    description = (
+        "【优先使用-赛事实时】当用户询问CS/CS2/CSGO正在进行/今日/即将开始的比赛，或上下文包含CS术语（eco、强起、A点、rush、AWP等）时，"
+        "应优先使用本工具而非通用联网搜索。支持按战队/赛事名过滤。仅当问题与CS无关或需要跨站新闻检索时再考虑联网搜索。"
+        "示例战队关键字：Tyloo（天禄）、NAVI、FaZe、G2、Vitality（小蜜蜂）、Astralis（A队）、Liquid（液体）、Heroic、Fnatic、MOUZ、C9"
+        "示例赛事关键字：Major、PGL Major、BLAST Premier、IEM Katowice、IEM Cologne、ESL Pro League、IEM Dallas、Gamers8、Copenhagen Major。"
+    )
+    available_for_llm = True
     parameters = [
         ("match_keywords", ToolParamType.STRING, "比赛关键词（战队名称、赛事名称等）", False, ""),
         ("include_upcoming", ToolParamType.BOOLEAN, "是否包含即将开始的比赛", False, True),
@@ -511,7 +527,12 @@ class GetPlayerInfoTool(BaseTool):
     """获取选手信息工具"""
     
     name = "get_player_info"
-    description = "当用户询问、谈论到特定选手的信息、数据、统计、表现或排名时使用。支持选手昵称和真实姓名查询，可获取Rating、ADR、KAST等详细统计"
+    description = (
+        "【优先使用-选手】当用户询问CS/CS2/CSGO选手（昵称/真名）的信息、数据、统计、表现或排名时，"
+        "优先调用本工具（可提供Rating/ADR/KAST等）。当问题是CS以外的电竞或泛娱乐人物信息时再考虑联网搜索。"
+        "示例选手关键字：s1mple、ZywOo、NiKo、device、m0NESY、ropz、broky、electronic、donk、YEKINDAR。"
+    )
+    available_for_llm = True
     parameters = [
         ("player_name", ToolParamType.STRING, "选手昵称或真实姓名", True, None),
         ("include_stats", ToolParamType.BOOLEAN, "是否包含详细统计数据", False, True),
@@ -585,7 +606,12 @@ class GetTeamInfoTool(BaseTool):
     """获取战队信息工具"""
     
     name = "get_team_info"
-    description = "当用户询问、谈论到特定战队的信息、排名、成员阵容或表现时使用。支持战队名称模糊匹配，可获取世界排名、队员构成等信息"
+    description = (
+        "【优先使用-战队】当用户询问CS/CS2/CSGO战队的信息、排名、阵容或表现时，优先调用本工具。"
+        "当战队不属于CS或话题与CS无关时，再考虑通用联网搜索。"
+        "示例战队关键字：NAVI、FaZe、G2、Vitality（小蜜蜂）、Astralis（A队）、Liquid（液体）、Heroic、Fnatic、MOUZ、C9"
+    )
+    available_for_llm = True
     parameters = [
         ("team_name", ToolParamType.STRING, "战队名称", True, None),
         ("include_players", ToolParamType.BOOLEAN, "是否包含队员信息", False, True),
@@ -648,7 +674,13 @@ class GetMatchInfoTool(BaseTool):
     """获取比赛信息工具"""
     
     name = "get_match_info"
-    description = "当用户询问、谈论到特定比赛的信息、结果、详情时使用。可查询比赛的基本信息、比分、时间等"
+    description = (
+        "【优先使用-比赛信息】当用户询问CS/CS2/CSGO比赛（含赛事名/战队名）信息、赛果、详情时，"
+        "优先使用本工具获取基本信息、比分与时间。非CS比赛或需要跨站新闻报道时再考虑联网搜索。"
+        "示例关键词：Tyloo（天禄）、NAVI、FaZe、G2、Vitality（小蜜蜂）、Astralis（A队）、Liquid（液体）、Heroic、Fnatic、MOUZ、C9、donk、ZywOo、NiKo、device。"
+        "示例赛事关键字：Major、PGL Major、BLAST Premier、IEM Katowice、IEM Cologne、ESL Pro League、IEM Dallas、Gamers8、Copenhagen Major。"
+    )
+    available_for_llm = True
     parameters = [
         ("match_keywords", ToolParamType.STRING, "比赛关键词（战队名称、赛事名称等）", True, None),
         ("include_results", ToolParamType.BOOLEAN, "是否包含比赛结果", False, [True,False]),
@@ -730,7 +762,13 @@ class DetectMatchEventsTool(BaseTool):
     """检测比赛事件工具 - 识别比分变化、重要时刻等"""
     
     name = "detect_match_events"
-    description = "当用户询问、谈论到CS比赛事件、比分变化、比赛亮点或重要时刻时使用。可检测比赛开始/结束、比分更新等事件，并按重要性评级"
+    description = (
+        "【优先使用-事件检测】当用户谈及CS/CS2/CSGO比赛进展、比分变化、关键回合或亮点时，"
+        "优先使用本工具检测事件（开始/结束/比分更新等）并按重要性返回。"
+        "示例触发关键词：Tyloo（天禄）、NAVI、FaZe、G2、Vitality（小蜜蜂）、Astralis（A队）、Liquid（液体）、Heroic、Fnatic、MOUZ、C9、donk、ZywOo、NiKo、device。"
+        "示例赛事关键字：Major、PGL Major、BLAST Premier、IEM Katowice、IEM Cologne、ESL Pro League、IEM Dallas、Gamers8、Copenhagen Major。"
+    )
+    available_for_llm = True
     parameters = [
         ("importance_threshold", ToolParamType.INTEGER, "事件重要性阈值（1-5），只返回达到此重要性的事件", False, 3),
         ("time_window_minutes", ToolParamType.INTEGER, "检测时间窗口（分钟），只返回此时间内的事件", False, 30),
