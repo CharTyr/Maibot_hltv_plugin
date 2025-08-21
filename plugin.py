@@ -1,964 +1,462 @@
-from typing import List, Tuple, Type, Any, Optional, Dict
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+CS2 HLTV插件 v3.0.0 - 诚实版本，不提供虚假数据
+"""
+
+from typing import List, Tuple, Type, Any, Optional, Dict, Set, Union
 import asyncio
-import aiohttp
-import time
+import json
 import logging
 from datetime import datetime, timedelta
-from dataclasses import dataclass
-from src.plugin_system.base import (
-    BasePlugin,
-    BaseAction,
-    BaseTool,
-    ToolParamType,
-    ConfigField
-)
-from src.plugin_system.apis import register_plugin
-from src.plugin_system.base.component_types import (
-    ComponentInfo,
-    ActionInfo,
-    ActionActivationType,
-    ComponentType,
-    ToolInfo
-)
+from dataclasses import dataclass, field
+
+# MaiBot imports
+from maibot.plugin import BaseTool, BaseAction, BasePlugin
+
+# 导入诚实的HLTV客户端
+from .realistic_hltv_client import HonestHLTVPlugin
 
 # 设置日志
 logger = logging.getLogger("plugin")
 
-@dataclass
-class MatchEvent:
-    """比赛事件数据类"""
-    event_type: str  # "score_change", "map_change", "match_start", "match_end", "overtime"
-    match_id: str
-    team1: str
-    team2: str
-    old_score: Tuple[int, int]
-    new_score: Tuple[int, int]
-    timestamp: datetime
-    description: str
-    importance: int  # 1-5, 5为最重要
+# 全局诚实插件实例
+honest_plugin = HonestHLTVPlugin()
 
-class MatchEventDetector:
-    """比赛事件检测器 - 检测比分变化和重要事件"""
+
+# 保留旧的客户端类以兼容性（已弃用）
+class HLTVAsyncClient:
+    """已弃用：基于hltv-async-api的HLTV客户端，现在使用诚实版本"""
     
     def __init__(self):
-        self.previous_matches: Dict[str, Dict] = {}
-        self.event_history: List[MatchEvent] = []
-        self.max_history = 100
+        self.logger = logging.getLogger('plugin')
+        self.logger.warning("HLTV数据获取受到严格限制，将返回诚实的结果")
     
-    def _generate_match_id(self, match: Dict) -> str:
-        """生成比赛唯一ID"""
-        teams = match.get('teams', [])
-        if len(teams) >= 2:
-            team1 = teams[0].get('name', 'TBD')
-            team2 = teams[1].get('name', 'TBD')
-            event = match.get('event', {}).get('name', 'Unknown')
-            return f"{team1}_vs_{team2}_{event}".replace(' ', '_')
-        return f"match_{hash(str(match))}"
+    async def get_matches(self, days: int = 1, live_only: bool = False) -> List[Dict]:
+        """重定向到诚实插件"""
+        result = await honest_plugin.get_cs2_matches()
+        return result.get('data', [])
     
-    def detect_events(self, current_matches: List[Dict]) -> List[MatchEvent]:
-        """检测比赛事件"""
-        events = []
-        current_time = datetime.now()
-        
-        for match in current_matches:
-            match_id = self._generate_match_id(match)
-            teams = match.get('teams', [])
-            
-            if len(teams) < 2:
-                continue
-                
-            team1_name = teams[0].get('name', 'TBD')
-            team2_name = teams[1].get('name', 'TBD')
-            current_score1 = teams[0].get('score', 0)
-            current_score2 = teams[1].get('score', 0)
-            
-            # 检查是否是新比赛或比分变化
-            if match_id in self.previous_matches:
-                prev_match = self.previous_matches[match_id]
-                prev_teams = prev_match.get('teams', [])
-                
-                if len(prev_teams) >= 2:
-                    prev_score1 = prev_teams[0].get('score', 0)
-                    prev_score2 = prev_teams[1].get('score', 0)
-                    
-                    # 检测比分变化
-                    if (current_score1 != prev_score1 or current_score2 != prev_score2):
-                        importance = self._calculate_score_importance(
-                            (prev_score1, prev_score2), 
-                            (current_score1, current_score2)
-                        )
-                        
-                        event = MatchEvent(
-                            event_type="score_change",
-                            match_id=match_id,
-                            team1=team1_name,
-                            team2=team2_name,
-                            old_score=(prev_score1, prev_score2),
-                            new_score=(current_score1, current_score2),
-                            timestamp=current_time,
-                            description=f"{team1_name} {current_score1} - {current_score2} {team2_name}",
-                            importance=importance
-                        )
-                        events.append(event)
-                    
-                    # 检测比赛结束
-                    if self._is_match_finished(current_score1, current_score2) and \
-                       not self._is_match_finished(prev_score1, prev_score2):
-                        winner = team1_name if current_score1 > current_score2 else team2_name
-                        event = MatchEvent(
-                            event_type="match_end",
-                            match_id=match_id,
-                            team1=team1_name,
-                            team2=team2_name,
-                            old_score=(prev_score1, prev_score2),
-                            new_score=(current_score1, current_score2),
-                            timestamp=current_time,
-                            description=f"比赛结束！{winner} 获胜",
-                            importance=5
-                        )
-                        events.append(event)
-            else:
-                # 新比赛开始
-                if current_score1 > 0 or current_score2 > 0:
-                    event = MatchEvent(
-                        event_type="match_start",
-                        match_id=match_id,
-                        team1=team1_name,
-                        team2=team2_name,
-                        old_score=(0, 0),
-                        new_score=(current_score1, current_score2),
-                        timestamp=current_time,
-                        description=f"比赛开始：{team1_name} vs {team2_name}",
-                        importance=3
-                    )
-                    events.append(event)
-            
-            # 更新比赛状态
-            self.previous_matches[match_id] = match
-        
-        # 添加事件到历史记录
-        self.event_history.extend(events)
-        if len(self.event_history) > self.max_history:
-            self.event_history = self.event_history[-self.max_history:]
-        
-        return events
+    async def get_team_ranking(self, max_teams: int = 30) -> List[Dict]:
+        """重定向到诚实插件"""
+        result = await honest_plugin.get_team_rankings()
+        return result.get('data', [])
     
-    def _calculate_score_importance(self, old_score: Tuple[int, int], new_score: Tuple[int, int]) -> int:
-        """计算比分变化的重要性"""
-        old_diff = abs(old_score[0] - old_score[1])
-        new_diff = abs(new_score[0] - new_score[1])
-        total_rounds = sum(new_score)
-        
-        # 比赛关键时刻
-        if total_rounds >= 15:  # 接近比赛结束
-            return 4
-        elif new_diff <= 1:  # 比分接近
-            return 4
-        elif old_diff > 3 and new_diff <= 2:  # 追分成功
-            return 5
-        elif total_rounds >= 10:  # 比赛中期
-            return 3
-        else:
-            return 2
-    
-    def _is_match_finished(self, score1: int, score2: int) -> bool:
-        """判断比赛是否结束"""
-        return (score1 >= 16 or score2 >= 16) and abs(score1 - score2) >= 2
-    
-    def get_recent_events(self, minutes: int = 30) -> List[MatchEvent]:
-        """获取最近的事件"""
-        cutoff_time = datetime.now() - timedelta(minutes=minutes)
-        return [event for event in self.event_history if event.timestamp >= cutoff_time]
+    async def get_match_results(self, days: int = 7, max_results: int = 20) -> List[Dict]:
+        """重定向到诚实插件"""
+        result = await honest_plugin.get_match_results()
+        return result.get('data', [])
 
 
-class HLTVAPIClient:
-    """HLTV API客户端，处理所有API调用和缓存"""
-    
-    def __init__(self, base_url: str = "https://hltv-api.vercel.app/api"):
-        self.base_url = base_url
-        self.cache = {}
-        self.cache_ttl = {}
-        
-    async def _make_request(self, endpoint: str, cache_duration: int = 300) -> Optional[Dict]:
-        """发起API请求，带缓存机制"""
-        cache_key = endpoint
-        current_time = time.time()
-        
-        # 检查缓存
-        if cache_key in self.cache and cache_key in self.cache_ttl:
-            if current_time < self.cache_ttl[cache_key]:
-                return self.cache[cache_key]
-        
-        try:
-            timeout = aiohttp.ClientTimeout(total=10)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.get(f"{self.base_url}/{endpoint}") as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        # 缓存数据
-                        self.cache[cache_key] = data
-                        self.cache_ttl[cache_key] = current_time + cache_duration
-                        logger.info(f"HLTV API请求成功: {endpoint}")
-                        return data
-                    else:
-                        logger.warning(f"HLTV API请求失败，状态码: {response.status}, 端点: {endpoint}")
-                        return None
-        except asyncio.TimeoutError:
-            logger.error(f"HLTV API请求超时: {endpoint}")
-            return None
-        except Exception as e:
-            logger.error(f"HLTV API请求异常: {endpoint}, 错误: {str(e)}")
-            return None
-    
-    async def get_matches(self) -> Optional[List[Dict]]:
-        """获取比赛列表"""
-        return await self._make_request("matches.json", cache_duration=60)
-    
-    async def get_players(self) -> Optional[List[Dict]]:
-        """获取选手列表"""
-        return await self._make_request("players.json", cache_duration=600)
-    
-    async def get_player_by_id(self, player_id: int) -> Optional[Dict]:
-        """根据ID获取选手详细信息"""
-        return await self._make_request(f"player.json?id={player_id}", cache_duration=300)
-    
-    async def get_teams(self) -> Optional[List[Dict]]:
-        """获取战队排名"""
-        return await self._make_request("teams.json", cache_duration=600)
-    
-    async def get_team_by_id(self, team_id: int) -> Optional[Dict]:
-        """根据ID获取战队详细信息"""
-        return await self._make_request(f"team.json?id={team_id}", cache_duration=300)
-    
-    async def get_results(self) -> Optional[List[Dict]]:
-        """获取比赛结果"""
-        return await self._make_request("results.json", cache_duration=300)
-    
-    async def get_match_by_id(self, match_id: int) -> Optional[Dict]:
-        """根据ID获取比赛详细信息"""
-        return await self._make_request(f"match.json?id={match_id}", cache_duration=60)
+# 全局客户端实例（向后兼容）
+hltv_client = HLTVAsyncClient()
 
 
-# API基础URL常量
-HLTV_API_BASE = "https://hltv-api.vercel.app/api"
-
-# 全局HLTV客户端实例和事件检测器
-hltv_client = HLTVAPIClient()
-match_event_detector = MatchEventDetector()
-
-
-class GetCS2ContextInfoTool(BaseTool):
-    """智能上下文信息提取工具 - 根据关键词自动查询相关信息"""
+class GetCurrentMatchContextTool(BaseTool):
+    """获取当前比赛上下文工具"""
     
-    name = "get_cs2_context_info"
-    description = (
-        "【优先使用】当话题明确涉及CS/CS2/CSGO电竞（赛事、战队、选手、比赛数据、战术术语）时，"
-        "优先调用本工具而非通用联网搜索。检测到以下CS术语时应触发：eco、强起、长枪局、半甲、全甲、A点、B点、"
-        "中路、rush、保枪、翻盘、闪、烟、雷、火、燃烧弹、拆包、下包、残局、1vX、AWP、AK、M4、沙鹰、格洛克、USP 等。"
-        "当用户泛泛讨论“CS比赛/选手/战队/赛事”或点名选手/战队时，使用本工具提供上下文汇总；"
-        "只有当问题与CS无关或需要跨站新闻/科普检索时才考虑通用联网搜索。"
-        "示例战队：Tyloo（天禄）、NAVI、FaZe、G2、Vitality（小蜜蜂）、Astralis（A队）、Liquid（液体）、Heroic、Fnatic、MOUZ、C9"
-        "示例选手：s1mple、ZywOo、NiKo、device、m0NESY、ropz、broky、electronic、donk、YEKINDAR。"
-        "示例赛事：Major、PGL Major、BLAST Premier、IEM 卡托维兹（Katowice）、IEM 科隆（Cologne）、ESL 职业联赛（EPL/Pro League）、IEM 达拉斯（Dallas）、Gamers8、Copenhagen Major。"
-    )
-    available_for_llm = True
-    parameters = [
-        ("context_keywords", ToolParamType.STRING, "从聊天上下文中提取的关键词（选手名、战队名、赛事名等）", True, None),
-        ("query_type", ToolParamType.STRING, "查询类型：player（选手）、team（战队）、match（比赛）、auto（自动判断）", False, "auto"),
-        ("include_recent_matches", ToolParamType.BOOLEAN, "是否包含最近比赛信息", False, True),
-    ]
+    name = "GetCurrentMatchContextTool"
+    description = "获取CS2比赛的实时上下文信息，包括比分、状态、参赛队伍等。当用户询问或谈论到特定战队的比赛情况时使用。"
     
-    async def execute(self, function_args: dict[str, Any]) -> dict[str, Any]:
-        """执行上下文信息查询"""
-        context_keywords = function_args.get("context_keywords", "").strip()
-        query_type = function_args.get("query_type", "auto").lower()
-        include_recent_matches = function_args.get("include_recent_matches", True)
-        
-        if not context_keywords:
-            return {"name": self.name, "content": "未提供有效的上下文关键词"}
-        
-        try:
-            context_info = []
-            keywords = [kw.strip() for kw in context_keywords.split(",") if kw.strip()]
-            
-            # 自动判断查询类型或按指定类型查询
-            if query_type in ["player", "auto"]:
-                player_info = await self._search_players(keywords)
-                if player_info:
-                    context_info.extend(player_info)
-            
-            if query_type in ["team", "auto"]:
-                team_info = await self._search_teams(keywords)
-                if team_info:
-                    context_info.extend(team_info)
-            
-            if query_type in ["match", "auto"] and include_recent_matches:
-                match_info = await self._get_recent_matches()
-                if match_info:
-                    context_info.extend(match_info)
-            
-            if context_info:
-                result = "\n".join(context_info)
-                logger.info(f"为关键词 '{context_keywords}' 提供了上下文信息")
-                return {"name": self.name, "content": result}
-            else:
-                return {"name": self.name, "content": f"未找到与 '{context_keywords}' 相关的信息"}
-                
-        except Exception as e:
-            logger.error(f"获取CS2上下文信息时出错: {str(e)}")
-            return {"name": self.name, "content": f"查询CS2信息时出错: {str(e)}"}
-    
-    async def _search_players(self, keywords: List[str]) -> List[str]:
-        """搜索选手信息"""
-        try:
-            players_data = await hltv_client.get_players()
-            if not players_data:
-                return []
-            
-            # 处理不同的数据结构
-            if isinstance(players_data, dict):
-                players = [players_data]
-            else:
-                players = players_data if isinstance(players_data, list) else []
-            
-            found_info = []
-            for keyword in keywords:
-                for player in players:
-                    nickname = player.get('nickname', '').lower()
-                    fullname = player.get('name', '').lower()
-                    
-                    if (keyword.lower() in nickname or 
-                        keyword.lower() in fullname or
-                        nickname in keyword.lower()):
-                        
-                        team_name = player.get('team', {}).get('name', '自由选手')
-                        rating = player.get('rating', 'N/A')
-                        age = player.get('age', 'N/A')
-                        
-                        info = (f"🎯 选手: {player.get('nickname', 'N/A')} "
-                               f"({player.get('name', 'N/A')}) - {team_name}, "
-                               f"Rating: {rating}, 年龄: {age}")
-                        found_info.append(info)
-                        break
-            
-            return found_info
-        except Exception as e:
-            logger.error(f"搜索选手信息出错: {str(e)}")
-            return []
-    
-    async def _search_teams(self, keywords: List[str]) -> List[str]:
-        """搜索战队信息"""
-        try:
-            teams_data = await hltv_client.get_teams()
-            if not teams_data:
-                return []
-            
-            # 处理不同的数据结构
-            if isinstance(teams_data, dict):
-                teams = [teams_data]
-            else:
-                teams = teams_data if isinstance(teams_data, list) else []
-            
-            found_info = []
-            for keyword in keywords:
-                for team in teams:
-                    team_name = team.get('name', '').lower()
-                    
-                    if keyword.lower() in team_name:
-                        ranking = team.get('ranking', 'N/A')
-                        players_count = len(team.get('players', []))
-                        
-                        info = (f"🏆 战队: {team.get('name', 'N/A')} "
-                               f"(排名: #{ranking}, 队员: {players_count}人)")
-                        found_info.append(info)
-                        break
-            
-            return found_info
-        except Exception as e:
-            logger.error(f"搜索战队信息出错: {str(e)}")
-            return []
-    
-    async def _get_recent_matches(self) -> List[str]:
-        """获取最近比赛信息"""
-        try:
-            matches = await hltv_client.get_matches()
-            if not matches:
-                return []
-            
-            # 处理数据结构
-            if isinstance(matches, dict):
-                matches = [matches]
-            elif not isinstance(matches, list):
-                return []
-            
-            match_info = []
-            for i, match in enumerate(matches[:3]):  # 最多3场比赛
-                teams = match.get('teams', [])
-                if len(teams) >= 2:
-                    event_name = match.get('event', {}).get('name', '未知赛事')
-                    stars = '★' * match.get('stars', 0) if match.get('stars', 0) > 0 else '无星级'
-                    
-                    info = (f"🔴 比赛: {teams[0].get('name', 'TBD')} vs {teams[1].get('name', 'TBD')} "
-                           f"({event_name}, {stars})")
-                    match_info.append(info)
-            
-            return match_info
-        except Exception as e:
-            logger.error(f"获取比赛信息出错: {str(e)}")
-            return []
-
-
-class CS2TopicDetectionAction(BaseAction):
-    """CS2/CSGO话题检测Action - 被动响应模式"""
-    
-    action_name = "cs2_topic_detection"
-    action_description = "当明确询问CS2/CSGO信息时提供友好的引导回复"
-    activation_type = ActionActivationType.LLM_JUDGE
-    
-    # LLM判断条件 - 更严格的触发条件
-    activation_conditions = [
-        "用户明确询问CS2/CSGO相关信息但没有具体指向",
-        "用户表达对电竞信息的一般性兴趣",
-        "用户询问如何获取CS2/CSGO数据"
-    ]
-    
-    action_parameters = {
-        "query_intent": "用户的查询意图描述"
+    parameters = {
+        "match_identifier": {
+            "type": "string",
+            "description": "比赛标识符，可以是战队名称、比赛ID或关键词",
+            "required": True
+        },
+        "context_depth": {
+            "type": "string", 
+            "description": "上下文深度级别",
+            "enum": ["basic", "detailed", "full"],
+            "default": "basic"
+        }
     }
     
-    action_require = [
-        "当用户询问CS2/CSGO信息但不够具体时使用",
-        "当用户需要引导如何获取电竞信息时使用"
-    ]
-    
-    associated_types = ["text"]
-    
-    async def execute(self) -> Tuple[bool, str]:
-        """执行友好引导回复"""
-        query_intent = self.action_data.get("query_intent", "")
+    async def execute(self, function_args: dict[str, Any]) -> dict[str, Any]:
+        """执行工具"""
+        match_identifier = function_args.get("match_identifier", "")
+        context_depth = function_args.get("context_depth", "basic")
         
         try:
-            logger.info(f"检测到CS2相关话题，可供上下文分析使用")
-            return True, "CS2话题检测完成"
+            # 获取所有比赛
+            matches = await hltv_client.get_matches(days=1, live_only=False)
+            
+            if not matches:
+                return {
+                    "name": self.name,
+                    "content": "由于HLTV反爬虫限制，无法获取实时比赛数据。请访问 https://www.hltv.org/matches 查看最新比赛信息。"
+                }
+            
+            # 查找匹配的比赛
+            target_match = None
+            for match in matches:
+                if (match_identifier.lower() in match.get('team1', '').lower() or 
+                    match_identifier.lower() in match.get('team2', '').lower() or
+                    match_identifier.lower() in match.get('event', '').lower()):
+                    target_match = match
+                    break
+            
+            if not target_match:
+                return {
+                    "name": self.name,
+                    "content": f"未找到与 '{match_identifier}' 相关的比赛。由于HLTV限制，建议直接访问官网查看。"
+                }
+            
+            # 根据深度返回不同详细程度的信息
+            if context_depth == "basic":
+                if target_match.status == "live":
+                    content = f"【实时比赛】{target_match.team1} {target_match.score1}-{target_match.score2} {target_match.team2}\n更新时间: {datetime.now().strftime('%H:%M')}"
+                else:
+                    content = f"{target_match.team1} vs {target_match.team2} - {target_match.event} ({target_match.date} {target_match.time})"
+            
+            elif context_depth == "detailed":
+                content = f"比赛: {target_match.team1} vs {target_match.team2}\n"
+                content += f"赛事: {target_match.event}\n"
+                content += f"时间: {target_match.date} {target_match.time}\n"
+                content += f"状态: {'正在进行' if target_match.status == 'live' else '即将开始'}\n"
+                content += f"星级: {'⭐' * target_match.rating}"
+                
+                if target_match.status == "live":
+                    content += f"\n当前比分: {target_match.score1}-{target_match.score2}"
+            
+            else:  # full
+                content = f"【详细比赛信息】\n"
+                content += f"比赛ID: {target_match.match_id}\n"
+                content += f"对阵: {target_match.team1} vs {target_match.team2}\n"
+                content += f"赛事: {target_match.event}\n"
+                content += f"时间: {target_match.date} {target_match.time}\n"
+                content += f"重要程度: {target_match.rating}/5 星\n"
+                content += f"状态: {'🔴 正在进行' if target_match.status == 'live' else '⏰ 即将开始'}\n"
+                
+                if target_match.status == "live":
+                    content += f"实时比分: {target_match.team1} {target_match.score1} - {target_match.score2} {target_match.team2}\n"
+                    content += f"最后更新: {datetime.now().strftime('%H:%M:%S')}"
+            
+            return {
+                "name": self.name,
+                "content": content
+            }
+            
         except Exception as e:
-            logger.error(f"CS2话题检测执行出错: {str(e)}")
-            return False, f"话题检测失败: {str(e)}"
+            logger.error(f"GetCurrentMatchContextTool执行失败: {e}")
+            return {
+                "name": self.name,
+                "content": "获取比赛信息时出现错误，请稍后重试"
+            }
 
 
 class GetLiveMatchStatusTool(BaseTool):
-    """获取进行中比赛的实时状态工具"""
+    """获取实时比赛状态工具"""
     
-    name = "get_live_match_status"
-    description = (
-        "【优先使用-赛事实时】当用户询问CS/CS2/CSGO正在进行/今日/即将开始的比赛，或上下文包含CS术语（eco、强起、A点、rush、AWP等）时，"
-        "应优先使用本工具而非通用联网搜索。支持按战队/赛事名过滤。仅当问题与CS无关或需要跨站新闻检索时再考虑联网搜索。"
-        "示例战队关键字：Tyloo（天禄）、NAVI、FaZe、G2、Vitality（小蜜蜂）、Astralis（A队）、Liquid（液体）、Heroic、Fnatic、MOUZ、C9"
-        "示例赛事关键字：Major、PGL Major、BLAST Premier、IEM Katowice、IEM Cologne、ESL Pro League、IEM Dallas、Gamers8、Copenhagen Major。"
-    )
-    available_for_llm = True
-    parameters = [
-        ("match_keywords", ToolParamType.STRING, "比赛关键词（战队名称、赛事名称等）", False, ""),
-        ("include_upcoming", ToolParamType.BOOLEAN, "是否包含即将开始的比赛", False, True),
-        ("max_matches", ToolParamType.INTEGER, "返回最大比赛数量", False, 10),
-    ]
+    name = "GetLiveMatchStatusTool"
+    description = "获取当前正在进行的CS2比赛状态。当用户询问现在有什么比赛或想了解实时比赛情况时使用。"
     
-    async def execute(self, function_args: dict[str, Any]) -> dict[str, Any]:
-        """执行实时比赛状态查询"""
-        match_keywords = function_args.get("match_keywords", "").strip()
-        include_upcoming = function_args.get("include_upcoming", True)
-        max_matches = function_args.get("max_matches", 10)
-        
-        try:
-            # 获取实时比赛数据
-            matches_data = await self._fetch_live_matches(match_keywords, include_upcoming, max_matches)
-            return {"name": self.name, "content": matches_data}
-        except Exception as e:
-            logger.error(f"获取实时比赛状态失败: {e}")
-            return {"name": self.name, "content": "获取实时比赛状态失败"}
-    
-    async def _fetch_live_matches(self, keywords: str, include_upcoming: bool, max_matches: int) -> str:
-        """获取实时比赛数据"""
-        try:
-            # 获取实时比赛
-            live_url = f"{hltv_client.base_url}/matches"
-            params = {"live": "true"}
-            
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
-                async with session.get(live_url, params=params) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        matches = data.get("matches", [])
-                        
-                        # 过滤关键词
-                        if keywords:
-                            filtered_matches = []
-                            for match in matches:
-                                team1 = match.get("team1", {}).get("name", "").lower()
-                                team2 = match.get("team2", {}).get("name", "").lower()
-                                event = match.get("event", {}).get("name", "").lower()
-                                if keywords.lower() in team1 or keywords.lower() in team2 or keywords.lower() in event:
-                                    filtered_matches.append(match)
-                            matches = filtered_matches
-                        
-                        # 限制数量
-                        matches = matches[:max_matches]
-                        
-                        if not matches:
-                            return "当前没有进行中的比赛"
-                        
-                        # 格式化输出
-                        result = []
-                        for match in matches:
-                            team1_name = match.get("team1", {}).get("name", "未知")
-                            team2_name = match.get("team2", {}).get("name", "未知")
-                            event_name = match.get("event", {}).get("name", "未知赛事")
-                            status = match.get("status", "未知状态")
-                            
-                            result.append(f"{team1_name} vs {team2_name} - {event_name} ({status})")
-                        
-                        return "\n".join(result)
-                    else:
-                        return "无法获取比赛数据"
-        except Exception as e:
-            logger.error(f"获取实时比赛数据失败: {e}")
-            return "获取比赛数据时发生错误"
-
-class GetPlayerInfoTool(BaseTool):
-    """获取选手信息工具"""
-    
-    name = "get_player_info"
-    description = (
-        "【优先使用-选手】当用户询问CS/CS2/CSGO选手（昵称/真名）的信息、数据、统计、表现或排名时，"
-        "优先调用本工具（可提供Rating/ADR/KAST等）。当问题是CS以外的电竞或泛娱乐人物信息时再考虑联网搜索。"
-        "示例选手关键字：s1mple、ZywOo、NiKo、device、m0NESY、ropz、broky、electronic、donk、YEKINDAR。"
-    )
-    available_for_llm = True
-    parameters = [
-        ("player_name", ToolParamType.STRING, "选手昵称或真实姓名", True, None),
-        ("include_stats", ToolParamType.BOOLEAN, "是否包含详细统计数据", False, True),
-        ("include_achievements", ToolParamType.BOOLEAN, "是否包含选手成就", False, False),
-    ]
+    parameters = {
+        "match_keywords": {
+            "type": "string",
+            "description": "比赛关键词过滤（可选）",
+            "required": False
+        },
+        "include_upcoming": {
+            "type": "array",
+            "items": {"type": "boolean"},
+            "description": "是否包含即将开始的比赛",
+            "default": None
+        },
+        "max_matches": {
+            "type": "integer",
+            "description": "最大返回比赛数量",
+            "default": None
+        }
+    }
     
     async def execute(self, function_args: dict[str, Any]) -> dict[str, Any]:
-        """执行选手信息查询"""
-        player_name = function_args.get("player_name", "").strip()
-        include_stats = function_args.get("include_stats", True)
+        """执行工具"""
+        match_keywords = function_args.get("match_keywords", "")
+        include_upcoming = function_args.get("include_upcoming", [True])
+        max_matches = function_args.get("max_matches", 5)
         
-        if not player_name:
-            return {"name": self.name, "content": "请提供选手名称"}
+        # 处理include_upcoming参数
+        include_upcoming_bool = include_upcoming[0] if include_upcoming else True
         
         try:
-            # 获取选手列表
-            players = await hltv_client.get_players()
-            if not players:
-                return {"name": self.name, "content": "无法获取选手数据"}
+            # 获取比赛数据
+            matches = await hltv_client.get_matches(days=1, live_only=False)
             
-            # 查找匹配的选手
-            found_player = None
-            for player in players:
-                nickname = player.get('nickname', '').lower()
-                fullname = player.get('name', '').lower()
+            # 过滤比赛
+            filtered_matches = []
+            for match in matches:
+                # 关键词过滤
+                if match_keywords:
+                    if not (match_keywords.lower() in match.team1.lower() or 
+                           match_keywords.lower() in match.team2.lower() or
+                           match_keywords.lower() in match.event.lower()):
+                        continue
                 
-                if (player_name.lower() in nickname or 
-                    player_name.lower() in fullname or
-                    nickname in player_name.lower()):
-                    found_player = player
-                    break
+                # 状态过滤
+                if match.status == "live":
+                    filtered_matches.append(match)
+                elif include_upcoming_bool and match.status == "scheduled":
+                    filtered_matches.append(match)
             
-            if not found_player:
-                return {"name": self.name, "content": f"未找到选手 '{player_name}'"}
+            if not filtered_matches:
+                return {
+                    "name": self.name,
+                    "content": "当前没有找到符合条件的比赛"
+                }
             
-            # 构建选手信息
-            result_parts = []
+            # 限制数量
+            if max_matches:
+                filtered_matches = filtered_matches[:max_matches]
             
-            # 基本信息
-            nickname = found_player.get('nickname', 'N/A')
-            fullname = found_player.get('name', 'N/A')
-            country = found_player.get('country', 'N/A')
-            team = found_player.get('team', 'N/A')
-            age = found_player.get('age', 'N/A')
+            # 构建响应
+            content = f"找到 {len(filtered_matches)} 场比赛:\n\n"
             
-            basic_info = f"选手: {nickname} ({fullname}) | 战队: {team} | 国家: {country} | 年龄: {age}"
-            result_parts.append(basic_info)
-            
-            # 详细统计（如果可用且请求包含）
-            if include_stats and 'stats' in found_player:
-                stats = found_player['stats']
-                rating = stats.get('rating', 'N/A')
-                adr = stats.get('adr', 'N/A')
-                kast = stats.get('kast', 'N/A')
-                impact = stats.get('impact', 'N/A')
-                kpr = stats.get('kpr', 'N/A')
-                dpr = stats.get('dpr', 'N/A')
+            for i, match in enumerate(filtered_matches, 1):
+                status_icon = "🔴" if match.status == "live" else "⏰"
+                content += f"{i}. {status_icon} {match.team1} vs {match.team2}\n"
+                content += f"   赛事: {match.event}\n"
                 
-                stats_info = f"统计: Rating {rating} | Impact {impact} | DPR {dpr} | ADR {adr} | KAST {kast}% | KPR {kpr}"
-                result_parts.append(stats_info)
+                if match.status == "live":
+                    content += f"   比分: {match.score1}-{match.score2} (进行中)\n"
+                else:
+                    content += f"   时间: {match.date} {match.time}\n"
+                
+                content += f"   重要程度: {'⭐' * match.rating}\n\n"
             
-            result = "\n".join(result_parts)
-            
-            return {"name": self.name, "content": result}
+            return {
+                "name": self.name,
+                "content": content.strip()
+            }
             
         except Exception as e:
-            return {"name": self.name, "content": f"查询选手信息时出错: {str(e)}"}
+            logger.error(f"GetLiveMatchStatusTool执行失败: {e}")
+            return {
+                "name": self.name,
+                "content": "获取比赛状态时出现错误，请稍后重试"
+            }
 
 
 class GetTeamInfoTool(BaseTool):
     """获取战队信息工具"""
     
-    name = "get_team_info"
-    description = (
-        "【优先使用-战队】当用户询问CS/CS2/CSGO战队的信息、排名、阵容或表现时，优先调用本工具。"
-        "当战队不属于CS或话题与CS无关时，再考虑通用联网搜索。"
-        "示例战队关键字：NAVI、FaZe、G2、Vitality（小蜜蜂）、Astralis（A队）、Liquid（液体）、Heroic、Fnatic、MOUZ、C9"
-    )
-    available_for_llm = True
-    parameters = [
-        ("team_name", ToolParamType.STRING, "战队名称", True, None),
-        ("include_players", ToolParamType.BOOLEAN, "是否包含队员信息", False, True),
-    ]
+    name = "GetTeamInfoTool"
+    description = "获取CS2战队的详细信息，包括排名、积分、近期表现等。当用户询问特定战队信息时使用。"
     
-    async def execute(self, function_args: dict[str, Any]) -> dict[str, Any]:
-        """执行战队信息查询"""
-        team_name = function_args.get("team_name", "").strip()
-        include_players = function_args.get("include_players", True)
-        
-        if not team_name:
-            return {"name": self.name, "content": "请提供战队名称"}
-        
-        try:
-            # 获取战队列表
-            teams = await hltv_client.get_teams()
-            if not teams:
-                return {"name": self.name, "content": "无法获取战队数据"}
-            
-            # 查找匹配的战队
-            found_team = None
-            for team in teams:
-                if team_name.lower() in team.get('name', '').lower():
-                    found_team = team
-                    break
-            
-            if not found_team:
-                return {"name": self.name, "content": f"未找到战队 '{team_name}'"}
-            
-            # 构建战队信息
-            result_parts = []
-            
-            # 基本信息
-            name = found_team.get('name', 'N/A')
-            country = found_team.get('country', 'N/A')
-            ranking = found_team.get('ranking', 'N/A')
-            
-            basic_info = f"战队: {name} | 排名: #{ranking} | 国家: {country}"
-            result_parts.append(basic_info)
-            
-            # 队员信息
-            if 'players' in found_team and found_team['players']:
-                players_list = []
-                for player in found_team['players']:
-                    player_name = player.get('nickname', player.get('name', 'Unknown'))
-                    player_country = player.get('country', 'N/A')
-                    players_list.append(f"{player_name} ({player_country})")
-                players_info = f"队员: {', '.join(players_list)}"
-                result_parts.append(players_info)
-            
-            result = "\n".join(result_parts)
-            
-            return {"name": self.name, "content": result}
-            
-        except Exception as e:
-            return {"name": self.name, "content": f"查询战队信息时出错: {str(e)}"}
-
-
-class GetMatchInfoTool(BaseTool):
-    """获取比赛信息工具"""
-    
-    name = "get_match_info"
-    description = (
-        "【优先使用-比赛信息】当用户询问CS/CS2/CSGO比赛（含赛事名/战队名）信息、赛果、详情时，"
-        "优先使用本工具获取基本信息、比分与时间。非CS比赛或需要跨站新闻报道时再考虑联网搜索。"
-        "示例关键词：Tyloo（天禄）、NAVI、FaZe、G2、Vitality（小蜜蜂）、Astralis（A队）、Liquid（液体）、Heroic、Fnatic、MOUZ、C9、donk、ZywOo、NiKo、device。"
-        "示例赛事关键字：Major、PGL Major、BLAST Premier、IEM Katowice、IEM Cologne、ESL Pro League、IEM Dallas、Gamers8、Copenhagen Major。"
-    )
-    available_for_llm = True
-    parameters = [
-        ("match_keywords", ToolParamType.STRING, "比赛关键词（战队名称、赛事名称等）", True, None),
-        ("include_results", ToolParamType.BOOLEAN, "是否包含比赛结果", False, [True,False]),
-        ("max_matches", ToolParamType.INTEGER, "返回最大比赛数量", False, None),
-    ]
-    
-    async def execute(self, function_args: dict[str, Any]) -> dict[str, Any]:
-        """执行比赛信息查询"""
-        match_keywords = function_args.get("match_keywords", "").strip()
-        include_results = function_args.get("include_results", True)
-        max_matches = function_args.get("max_matches", 5)
-        
-        if not match_keywords:
-            return {"name": self.name, "content": "请提供比赛关键词"}
-        
-        try:
-            # 获取比赛数据
-            matches_data = await self._fetch_match_info(match_keywords, include_results, max_matches)
-            return {"name": self.name, "content": matches_data}
-        except Exception as e:
-            logger.error(f"获取比赛信息失败: {e}")
-            return {"name": self.name, "content": "获取比赛信息失败"}
-    
-    async def _fetch_match_info(self, keywords: str, include_results: bool, max_matches: int) -> str:
-        """获取比赛信息数据"""
-        try:
-            # 获取比赛数据
-            matches_url = f"{hltv_client.base_url}/matches"
-            
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
-                async with session.get(matches_url) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        matches = data.get("matches", [])
-                        
-                        # 过滤关键词
-                        filtered_matches = []
-                        for match in matches:
-                            team1 = match.get("team1", {}).get("name", "").lower()
-                            team2 = match.get("team2", {}).get("name", "").lower()
-                            event = match.get("event", {}).get("name", "").lower()
-                            if keywords.lower() in team1 or keywords.lower() in team2 or keywords.lower() in event:
-                                filtered_matches.append(match)
-                        
-                        # 限制数量
-                        filtered_matches = filtered_matches[:max_matches]
-                        
-                        if not filtered_matches:
-                            return "未找到相关比赛信息"
-                        
-                        # 格式化输出
-                        result = []
-                        for match in filtered_matches:
-                            team1_name = match.get("team1", {}).get("name", "未知")
-                            team2_name = match.get("team2", {}).get("name", "未知")
-                            event_name = match.get("event", {}).get("name", "未知赛事")
-                            date = match.get("date", "未知时间")
-                            
-                            match_info = f"{team1_name} vs {team2_name} - {event_name} ({date})"
-                            
-                            if include_results and "result" in match:
-                                result_info = match.get("result", {})
-                                if result_info:
-                                    score = result_info.get("score", "")
-                                    if score:
-                                        match_info += f" | 比分: {score}"
-                            
-                            result.append(match_info)
-                        
-                        return "\n".join(result)
-                    else:
-                        return "无法获取比赛数据"
-        except Exception as e:
-            logger.error(f"获取比赛信息失败: {e}")
-            return "获取比赛数据时发生错误"
-
-
-class DetectMatchEventsTool(BaseTool):
-    """检测比赛事件工具 - 识别比分变化、重要时刻等"""
-    
-    name = "detect_match_events"
-    description = (
-        "【优先使用-事件检测】当用户谈及CS/CS2/CSGO比赛进展、比分变化、关键回合或亮点时，"
-        "优先使用本工具检测事件（开始/结束/比分更新等）并按重要性返回。"
-        "示例触发关键词：Tyloo（天禄）、NAVI、FaZe、G2、Vitality（小蜜蜂）、Astralis（A队）、Liquid（液体）、Heroic、Fnatic、MOUZ、C9、donk、ZywOo、NiKo、device。"
-        "示例赛事关键字：Major、PGL Major、BLAST Premier、IEM Katowice、IEM Cologne、ESL Pro League、IEM Dallas、Gamers8、Copenhagen Major。"
-    )
-    available_for_llm = True
-    parameters = [
-        ("importance_threshold", ToolParamType.INTEGER, "事件重要性阈值（1-5），只返回达到此重要性的事件", False, 3),
-        ("time_window_minutes", ToolParamType.INTEGER, "检测时间窗口（分钟），只返回此时间内的事件", False, 30),
-    ]
-    
-    async def execute(self, function_args: dict[str, Any]) -> dict[str, Any]:
-        importance_threshold = function_args.get("importance_threshold", 3)
-        time_window_minutes = function_args.get("time_window_minutes", 30)
-        
-        try:
-            # 获取当前比赛数据
-            matches = await hltv_client.get_matches()
-            if not matches:
-                return {"name": self.name, "content": "无法获取比赛数据"}
-            
-            if isinstance(matches, dict):
-                matches = [matches]
-            
-            # 检测事件
-            events = match_event_detector.detect_events(matches)
-            
-            # 获取最近的重要事件
-            recent_events = match_event_detector.get_recent_events(time_window_minutes)
-            important_events = [e for e in recent_events if e.importance >= importance_threshold]
-            
-            if not important_events:
-                return {"name": self.name, "content": "当前时间窗口内没有检测到重要比赛事件"}
-            
-            result_parts = []
-            
-            for event in important_events:
-                # 时间格式化
-                time_str = event.timestamp.strftime("%H:%M")
-                
-                event_detail = f"[{time_str}] {event.description} | 重要性: {event.importance}/5 | 比分: {event.old_score[0]}-{event.old_score[1]} → {event.new_score[0]}-{event.new_score[1]}"
-                result_parts.append(event_detail)
-            
-            result = "\n".join(result_parts)
-            logger.info(f"检测到{len(important_events)}个重要比赛事件")
-            return {"name": self.name, "content": result}
-            
-        except Exception as e:
-            logger.error(f"检测比赛事件时出错: {str(e)}")
-            return {"name": self.name, "content": f"检测比赛事件时出错: {str(e)}"}
-
-
-class MatchEventNotificationAction(BaseAction):
-    """比赛事件检测记录（仅用于上下文分析）"""
-    
-    name = "match_event_notification"
-    description = "检测重要比赛事件并记录，提供上下文信息"
-    activation_type = ActionActivationType.LLM_JUDGE
-    
-    @classmethod
-    def get_action_info(cls) -> ActionInfo:
-        from src.plugin_system.base.component_types import ComponentType
-        return ActionInfo(
-            name=cls.name,
-            component_type=ComponentType.ACTION,
-            description=cls.description,
-            activation_type=cls.activation_type,
-            llm_judge_prompt="当需要检测CS2/CSGO比赛事件时触发此动作"
-        )
-    
-    async def execute(self) -> Tuple[bool, str]:
-        try:
-            # 获取当前比赛数据并检测事件
-            matches = await hltv_client.get_matches()
-            if not matches:
-                return False, "无法获取比赛数据"
-            
-            if isinstance(matches, dict):
-                matches = [matches]
-            
-            # 检测新事件
-            events = match_event_detector.detect_events(matches)
-            
-            # 过滤重要事件
-            important_events = [e for e in events if e.importance >= 4]
-            
-            logger.info(f"检测到{len(important_events)}个重要比赛事件，可供上下文分析使用")
-            return True, f"比赛事件检测完成，发现{len(important_events)}个重要事件"
-            
-        except Exception as e:
-            logger.error(f"检测比赛事件时出错: {str(e)}")
-            return False, f"事件检测失败: {str(e)}"
-
-
-class LiveMatchDiscussionAction(BaseAction):
-    """实时比赛讨论检测（仅记录模式）"""
-    
-    name = "live_match_discussion"
-    description = "检测用户对实时比赛的讨论，仅用于上下文分析"
-    activation_type = ActionActivationType.NEVER
-    
-    @staticmethod
-    def get_action_info() -> ActionInfo:
-        return ActionInfo(
-            name="live_match_discussion",
-            description="检测用户对实时比赛的讨论，仅用于上下文分析",
-            component_type=ComponentType.ACTION,
-            activation_type=ActionActivationType.NEVER
-        )
-    
-    async def execute(self, context: dict) -> tuple[bool, str]:
-        """仅记录，不执行任何操作"""
-        return True, "比赛讨论检测完成"
-
-
-class LiveMatchMonitorAction(BaseAction):
-    """实时比赛监控状态记录（仅记录模式）"""
-    
-    name = "live_match_monitor"
-    description = "监控实时比赛状态变化，仅用于上下文分析"
-    activation_type = ActionActivationType.NEVER
-    
-    @staticmethod
-    def get_action_info() -> ActionInfo:
-        return ActionInfo(
-            name="live_match_monitor",
-            description="监控实时比赛状态变化，仅用于上下文分析",
-            component_type=ComponentType.ACTION,
-            activation_type=ActionActivationType.NEVER
-        )
-    
-    async def execute(self, context: dict) -> tuple[bool, str]:
-        """仅记录，不执行任何操作"""
-        return True, "比赛监控状态记录完成"
-
-
-@register_plugin
-class CS2HLTVPlugin(BasePlugin):
-    """CS2/CSGO HLTV信息插件"""
-    
-    plugin_name = "cs2_hltv_plugin"
-    enable_plugin = True
-    dependencies = []
-    python_dependencies = ["aiohttp"]
-    config_file_name = "config.toml"
-    
-    def __init__(self, plugin_dir: str):
-        """初始化CS2 HLTV插件"""
-        super().__init__(plugin_dir)
-    
-    config_section_descriptions = {
-        "plugin": "插件基本配置",
-        "api": "HLTV API配置", 
-        "cache": "数据缓存配置",
-        "responses": "响应行为配置"
-    }
-    
-    config_schema = {
-        "plugin": {
-            "name": ConfigField(type=str, default="cs2_hltv_plugin", description="插件名称"),
-            "version": ConfigField(type=str, default="1.0.0", description="插件版本"),
-            "enabled": ConfigField(type=bool, default=True, description="是否启用插件"),
+    parameters = {
+        "team_name": {
+            "type": "string",
+            "description": "战队名称",
+            "required": True
         },
-        "api": {
-            "base_url": ConfigField(
-                type=str, 
-                default="https://hltv-api.vercel.app/api", 
-                description="HLTV API基础URL"
-            ),
-            "request_timeout": ConfigField(type=int, default=10, description="API请求超时时间(秒)"),
-            "retry_attempts": ConfigField(type=int, default=3, description="API请求重试次数"),
-        },
-        "cache": {
-            "player_cache_duration": ConfigField(type=int, default=600, description="选手数据缓存时间(秒)"),
-            "team_cache_duration": ConfigField(type=int, default=600, description="战队数据缓存时间(秒)"),
-            "match_cache_duration": ConfigField(type=int, default=60, description="比赛数据缓存时间(秒)"),
-        },
-        "responses": {
-            "enable_general_response": ConfigField(type=bool, default=True, description="启用通用CS2话题响应"),
-            "enable_live_discussion": ConfigField(type=bool, default=True, description="启用实时比赛讨论参与"),
-            "enable_event_notifications": ConfigField(type=bool, default=True, description="启用比赛事件通知"),
-            "enable_auto_monitoring": ConfigField(type=bool, default=False, description="启用自动比赛监控"),
-            "max_results_per_query": ConfigField(type=int, default=5, description="每次查询最大结果数"),
+        "include_ranking": {
+            "type": "array",
+            "items": {"type": "boolean"},
+            "description": "是否包含排名信息",
+            "default": None
         }
     }
     
-    def get_plugin_components(self) -> List[Tuple[ComponentInfo, Type]]:
-        return [
-            (GetCS2ContextInfoTool.get_tool_info(), GetCS2ContextInfoTool),  # 智能上下文信息工具
-            (GetLiveMatchStatusTool.get_tool_info(), GetLiveMatchStatusTool),  # 实时比赛状态工具
-            (DetectMatchEventsTool.get_tool_info(), DetectMatchEventsTool),  # 比赛事件检测工具
-            (LiveMatchDiscussionAction.get_action_info(), LiveMatchDiscussionAction),  # 智能比赛讨论参与
-            (MatchEventNotificationAction.get_action_info(), MatchEventNotificationAction),  # 比赛事件通知
-            (CS2TopicDetectionAction.get_action_info(), CS2TopicDetectionAction),
-            (LiveMatchMonitorAction.get_action_info(), LiveMatchMonitorAction),
-            (GetPlayerInfoTool.get_tool_info(), GetPlayerInfoTool),
-            (GetTeamInfoTool.get_tool_info(), GetTeamInfoTool),
-            (GetMatchInfoTool.get_tool_info(), GetMatchInfoTool),
+    async def execute(self, function_args: dict[str, Any]) -> dict[str, Any]:
+        """执行工具"""
+        team_name = function_args.get("team_name", "")
+        include_ranking = function_args.get("include_ranking", [True])
+        
+        # 处理include_ranking参数
+        include_ranking_bool = include_ranking[0] if include_ranking else True
+        
+        try:
+            content = f"【{team_name} 战队信息】\n\n"
+            
+            if include_ranking_bool:
+                # 获取战队排名
+                teams = await hltv_client.get_team_ranking(max_teams=30)
+                
+                team_info = None
+                for team in teams:
+                    if team_name.lower() in team.get('title', '').lower():
+                        team_info = team
+                        break
+                
+                if team_info:
+                    content += f"世界排名: #{team_info.get('rank', 'N/A')}\n"
+                    content += f"积分: {team_info.get('points', 'N/A')}\n"
+                    content += f"排名变化: {team_info.get('change', '-')}\n\n"
+                else:
+                    content += f"未找到 {team_name} 的排名信息\n\n"
+            
+            # 获取近期比赛
+            matches = await hltv_client.get_matches(days=7, live_only=False)
+            team_matches = []
+            
+            for match in matches:
+                if (team_name.lower() in match.team1.lower() or 
+                    team_name.lower() in match.team2.lower()):
+                    team_matches.append(match)
+            
+            if team_matches:
+                content += "近期比赛:\n"
+                for match in team_matches[:3]:
+                    status = "进行中" if match.status == "live" else f"{match.date} {match.time}"
+                    content += f"• {match.team1} vs {match.team2} ({match.event}) - {status}\n"
+            else:
+                content += "暂无近期比赛信息\n"
+            
+            return {
+                "name": self.name,
+                "content": content
+            }
+            
+        except Exception as e:
+            logger.error(f"GetTeamInfoTool执行失败: {e}")
+            return {
+                "name": self.name,
+                "content": f"获取 {team_name} 信息时出现错误，请稍后重试"
+            }
+
+
+class GetMatchResultsTool(BaseTool):
+    """获取比赛结果工具"""
+    
+    name = "GetMatchResultsTool"
+    description = "获取最近的CS2比赛结果。当用户询问比赛结果或想了解最近比赛情况时使用。"
+    
+    parameters = {
+        "days": {
+            "type": "integer",
+            "description": "查询最近几天的结果",
+            "default": 3
+        },
+        "team_filter": {
+            "type": "string",
+            "description": "战队名称过滤（可选）",
+            "required": False
+        },
+        "max_results": {
+            "type": "integer",
+            "description": "最大返回结果数量",
+            "default": 10
+        }
+    }
+    
+    async def execute(self, function_args: dict[str, Any]) -> dict[str, Any]:
+        """执行工具"""
+        days = function_args.get("days", 3)
+        team_filter = function_args.get("team_filter", "")
+        max_results = function_args.get("max_results", 10)
+        
+        try:
+            results = await hltv_client.get_match_results(days=days, max_results=max_results)
+            
+            if not results:
+                return {
+                    "name": self.name,
+                    "content": "未找到最近的比赛结果"
+                }
+            
+            # 过滤结果
+            if team_filter:
+                filtered_results = []
+                for result in results:
+                    if (team_filter.lower() in result.get('team1', '').lower() or
+                        team_filter.lower() in result.get('team2', '').lower()):
+                        filtered_results.append(result)
+                results = filtered_results
+            
+            if not results:
+                return {
+                    "name": self.name,
+                    "content": f"未找到与 '{team_filter}' 相关的比赛结果"
+                }
+            
+            content = f"最近 {days} 天的比赛结果:\n\n"
+            
+            for i, result in enumerate(results[:max_results], 1):
+                team1 = result.get('team1', 'TBD')
+                team2 = result.get('team2', 'TBD')
+                score1 = result.get('score1', '0')
+                score2 = result.get('score2', '0')
+                event = result.get('event', 'Unknown Event')
+                
+                # 判断胜负
+                winner = team1 if int(score1) > int(score2) else team2
+                content += f"{i}. {team1} {score1}-{score2} {team2}\n"
+                content += f"   胜者: {winner} | 赛事: {event}\n\n"
+            
+            return {
+                "name": self.name,
+                "content": content.strip()
+            }
+            
+        except Exception as e:
+            logger.error(f"GetMatchResultsTool执行失败: {e}")
+            return {
+                "name": self.name,
+                "content": "获取比赛结果时出现错误，请稍后重试"
+            }
+
+
+# Action组件（仅记录，不主动发送消息）
+class CS2TopicDetectionAction(BaseAction):
+    """CS2话题检测Action"""
+    
+    name = "CS2TopicDetectionAction"
+    description = "检测群聊中的CS2相关话题讨论"
+    
+    async def execute(self, message_data: dict) -> dict:
+        """执行Action - 仅记录，不发送消息"""
+        message_content = message_data.get("content", "").lower()
+        
+        cs2_keywords = [
+            "cs2", "csgo", "反恐精英", "hltv", "major", "比赛", "战队",
+            "navi", "faze", "vitality", "astralis", "g2", "spirit"
         ]
+        
+        detected_keywords = [kw for kw in cs2_keywords if kw in message_content]
+        
+        if detected_keywords:
+            logger.info(f"检测到CS2话题: {detected_keywords}")
+        
+        return {"detected": len(detected_keywords) > 0, "keywords": detected_keywords}
+
+
+class CS2HLTVPlugin(BasePlugin):
+    """CS2 HLTV插件主类"""
+    
+    name = "cs2_hltv_plugin"
+    version = "3.0.0"
+    description = "CS2/CSGO数据查询插件：目前无法绕过HLTV反爬虫，不提供模拟/虚假数据，受限时返回引导信息"
+    
+    dependencies = []
+    
+    def __init__(self):
+        super().__init__()
+        self.logger = logging.getLogger("plugin")
+    
+    async def on_plugin_load(self):
+        """插件加载时的初始化"""
+        self.logger.info("CS2 HLTV插件 v3.0.0 已加载（诚实版：不抓取、不绕过反爬虫、无模拟数据）")
+        self.logger.info("当HLTV数据受限时，工具将返回空结果与官方渠道指引。")
+    
+    async def on_plugin_unload(self):
+        """插件卸载时的清理"""
+        self.logger.info("CS2 HLTV插件已卸载")
+    
+    def get_tools(self) -> List[Type[BaseTool]]:
+        """返回工具列表"""
+        return [
+            GetCurrentMatchContextTool,
+            GetLiveMatchStatusTool,
+            GetTeamInfoTool,
+            GetMatchResultsTool
+        ]
+    
+    def get_actions(self) -> List[Type[BaseAction]]:
+        """返回Action列表"""
+        return [
+            CS2TopicDetectionAction
+        ]
+
+
+# 导出插件类
+plugin_class = CS2HLTVPlugin

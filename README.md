@@ -2,6 +2,13 @@
 
 > 🛠️ **CS2/CSGO电竞数据工具插件** - 为MaiBot提供CS2/CSGO相关的上下文数据查询工具
 
+> 重要说明（v3.0.0）
+>
+> - 无法绕过 HLTV.org 的反爬虫，不进行任何自动化抓取。
+> - 不提供模拟/伪造数据；当受限时按原样返回空数据，并给出官方渠道指引。
+> - 推荐通过 HLTV 官网/官方App/官方社媒 或 Steam 内置途径查看实时信息。
+> - 本插件仅提供工具能力，不主动发送消息。
+
 ## 🌟 核心特性
 
 ### 🔧 纯工具模式
@@ -29,11 +36,13 @@
 
 ## 🛠️ 技术架构
 
-### 📡 API 集成
-- **数据源**: HLTV 非官方 API (https://hltv-api.vercel.app/)
-- **端点支持**: 选手、战队、比赛、结果等多种数据类型
-- **错误处理**: 完整的超时、重试和异常处理机制
-- **异步请求**: 基于 aiohttp 的高性能异步HTTP客户端
+### 📡 数据与行为
+- 本版本不对 HLTV.org 发起自动抓取请求。
+- 当用户请求 HLTV 数据时，若受反爬策略限制，将返回空结果与提示信息。
+- 提供官方渠道链接，便于用户自行查看：
+  - https://www.hltv.org/matches
+  - https://www.hltv.org/ranking/teams
+  - https://www.hltv.org/results
 
 ### 💾 智能缓存系统
 - **多层级缓存**: 选手、战队、比赛数据分别缓存
@@ -101,21 +110,9 @@
 
 ## ⚙️ 配置选项
 
-### API 配置
-```toml
-[api]
-base_url = "https://hltv-api.vercel.app/api"
-request_timeout = 10
-retry_attempts = 3
-```
+（本版本无外部API配置项）
 
-### 缓存配置
-```toml
-[cache]
-player_cache_duration = 600  # 选手数据缓存10分钟
-team_cache_duration = 600    # 战队数据缓存10分钟
-match_cache_duration = 60    # 比赛数据缓存1分钟
-```
+（本版本无抓取缓存配置项）
 
 ### 工具配置
 ```toml
@@ -141,17 +138,12 @@ enable_event_detection = true      # 启用事件检测功能
 队员: ZywOo (France), apEX (France), dupreeh (Denmark), Magisk (Denmark), Spinx (Israel)
 ```
 
-#### 实时比赛状态工具输出
+#### 实时比赛状态工具输出（受限场景）
 ```
-进行中: Navi vs G2 | IEM Katowice 2024 | 08-20 14:30 | 比分: 12-8 | bo3
-即将开始: Vitality vs FaZe | IEM Cologne 2024 | 08-20 20:00 | bo3
+由于HLTV反爬虫限制，无法获取实时比赛数据。请访问 https://www.hltv.org/matches 查看最新比赛信息。
 ```
 
-#### 比赛事件检测工具输出
-```
-[14:32] Navi vs G2 比分更新 | 重要性: 4/5 | 比分: 11-8 → 12-8
-[14:28] 关键回合胜利 | 重要性: 3/5 | 比分: 10-8 → 11-8
-```
+（本版本不提供自动事件检测/主动通知能力）
 
 #### 上下文信息工具输出
 ```
@@ -165,7 +157,7 @@ enable_event_detection = true      # 启用事件检测功能
 ### 系统要求
 - **MaiBot版本**: >= 0.10.0
 - **Python版本**: >= 3.8
-- **依赖包**: aiohttp
+- **依赖包**: 无强制第三方依赖（诚实版不进行抓取）
 - **运行模式**: 纯工具模式（无主动消息）
 
 ### 安装步骤
@@ -175,10 +167,7 @@ enable_event_detection = true      # 启用事件检测功能
    cd Maibot_hltv_plugin
    ```
 
-2. **安装依赖**
-   ```bash
-   pip install aiohttp
-   ```
+2. 无需安装额外依赖（若你仅使用诚实版工具能力）
 
 3. **部署插件**
    ```bash
@@ -196,34 +185,21 @@ enable_event_detection = true      # 启用事件检测功能
    - 工具将在后台为麦麦提供数据支持
 
 ### 配置文件
-插件会自动创建配置文件 `config.toml`，可根据需要调整参数：
-- API请求超时时间
-- 缓存策略设置
-- 工具功能开关
+插件可使用 `config_template.toml` 作为参考生成 `config.toml`。
+- 若 `config.toml` 由运行环境或部署脚本自动生成，请勿提交至仓库（本仓库已在 `.gitignore` 中忽略）。
+- 可在 README 或部署说明中明确告知：`config.toml` 仅在本地/部署环境存在。
 
 ## 🔧 开发与测试
 
-### 测试脚本
-插件包含完整的测试脚本 `test_plugin.py`：
-```bash
-cd /path/to/MaiBot/plugins/cs2_hltv_plugin
-python test_plugin.py
-```
+### 测试
+本版本不再包含本地测试脚本。请在集成的 MaiBot 环境中通过工具调用进行验证。
 
 ### 测试覆盖
-- ✅ HLTV API连接测试
-- ✅ 所有工具组件功能测试
-- ✅ 所有检测组件加载测试
-- ✅ 实时比赛状态测试
-- ✅ 事件检测系统测试
-- ✅ 缓存机制验证
 - ✅ 纯工具模式验证
+- ✅ 受限场景下的用户引导信息
 
 ### 性能指标
-- **API响应时间**: < 2秒
-- **缓存命中率**: > 80%
-- **内存使用**: < 30MB（纯工具模式）
-- **并发支持**: 多群聊同时使用
+- 诚实版不进行网络抓取，无相关 API 性能指标
 
 ## ⚙️ 配置说明
 
@@ -231,38 +207,16 @@ python test_plugin.py
 ```toml
 [plugin]
 name = "cs2_hltv_plugin"
-version = "1.0.0"
+version = "3.0.0"
 enabled = true
 ```
 
-### API 配置
-```toml
-[api]
-base_url = "https://hltv-api.vercel.app/api"
-request_timeout = 10
-retry_attempts = 3
-```
-
-### 缓存配置
-```toml
-[cache]
-player_cache_duration = 600    # 选手数据缓存10分钟
-team_cache_duration = 600      # 战队数据缓存10分钟
-match_cache_duration = 60      # 比赛数据缓存1分钟
-```
-
-### 响应配置
-```toml
-[responses]
-enable_general_response = true      # 启用通用CS2话题响应
-enable_auto_monitoring = false      # 启用自动比赛监控
-max_results_per_query = 5          # 每次查询最大结果数
-```
+（根据需要可在未来扩展工具级别的响应开关）
 
 ## 📦 依赖要求
 
 ### Python 依赖
-- `aiohttp` - 异步HTTP客户端
+- 无（诚实版不进行外部抓取）
 
 ### MaiBot 版本要求
 - 最低版本: 0.10.0
@@ -270,25 +224,21 @@ max_results_per_query = 5          # 每次查询最大结果数
 ## 🔧 安装指南
 
 1. 将插件文件夹复制到 MaiBot 的 `plugins/` 目录下
-2. 确保安装了 `aiohttp` 依赖：
-   ```bash
-   pip install aiohttp
-   ```
-3. 重启 MaiBot
-4. 在配置文件中启用插件
+2. 重启 MaiBot
+3. 在配置文件中启用插件
 
 ## 🐛 故障排除
 
 ### 常见问题
 
 **Q: 插件无法获取数据**
-A: 检查网络连接和 HLTV API 可用性，查看日志中的错误信息
+A: HLTV.org 反爬虫限制导致无法自动获取数据是预期行为。请使用 README 中提供的官方渠道链接查看。
 
-**Q: 响应速度慢**
-A: 调整缓存配置，增加缓存时长减少API调用频率
+**Q: 能否自动抓取 HLTV 数据？**
+A: 出于合规与稳定性考虑，v3 诚实版不进行抓取，也不尝试绕过反爬虫。
 
 **Q: 选手/战队搜索不到**
-A: 尝试使用完整的英文名称或常用昵称
+A: 请通过 HLTV 官方渠道进行检索与查看。
 
 ### 日志查看
 插件使用标准的 Python logging 模块，日志级别包括：
@@ -312,6 +262,5 @@ A: 尝试使用完整的英文名称或常用昵称
 
 ## 🙏 致谢
 
-- HLTV.org 提供的数据源
-- hltv-api 项目提供的 API 接口
+- HLTV.org 官方网站与服务
 - MaiBot 开发团队的插件系统支持

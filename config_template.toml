@@ -1,0 +1,38 @@
+# CS2 HLTV插件配置文件
+# 版本: 2.0.0 - 完全基于hltv-async-api库
+
+[cs2_hltv_plugin]
+# 插件基本信息
+version = "2.0.0"
+enabled = true
+
+# API配置
+# 使用hltv-async-api库直接抓取HLTV.org数据
+# 当遇到403错误时自动使用模拟数据回退
+
+# 缓存配置
+cache_duration_matches = 60        # 比赛数据缓存时间(秒)
+cache_duration_teams = 3600        # 战队排名缓存时间(秒) 
+cache_duration_results = 300       # 比赛结果缓存时间(秒)
+
+# 查询配置
+max_matches_per_query = 10         # 每次查询最大比赛数量
+max_teams_in_ranking = 30          # 战队排名最大数量
+max_results_per_query = 20         # 每次查询最大结果数量
+default_query_days = 1             # 默认查询天数
+
+# 功能开关
+enable_mock_data_fallback = true   # 启用模拟数据回退(推荐开启)
+enable_caching = true              # 启用缓存机制
+enable_detailed_logging = true     # 启用详细日志
+
+# 模拟数据配置
+mock_live_matches = 3              # 模拟实时比赛数量
+mock_team_count = 5                # 模拟战队排名数量
+mock_results_count = 3             # 模拟比赛结果数量
+
+# 工具响应配置
+context_depth_default = "basic"    # 默认上下文深度
+include_match_ratings = true       # 包含比赛重要程度
+show_live_scores = true            # 显示实时比分
+show_ranking_changes = true        # 显示排名变化
