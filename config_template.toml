@@ -1,38 +1,62 @@
-# CS2 HLTV插件配置文件
-# 版本: 2.0.0 - 完全基于hltv-async-api库
+# CS2 HLTV 插件配置
 
-[cs2_hltv_plugin]
-# 插件基本信息
-version = "2.0.0"
-enabled = true
+[cache]
+# 比赛数据缓存时间（秒）
+matches_ttl = 120
 
-# API配置
-# 使用hltv-async-api库直接抓取HLTV.org数据
-# 当遇到403错误时自动使用模拟数据回退
+# 排名数据缓存时间（秒）
+rankings_ttl = 3600
 
-# 缓存配置
-cache_duration_matches = 60        # 比赛数据缓存时间(秒)
-cache_duration_teams = 3600        # 战队排名缓存时间(秒) 
-cache_duration_results = 300       # 比赛结果缓存时间(秒)
+# 结果数据缓存时间（秒）
+results_ttl = 600
 
-# 查询配置
-max_matches_per_query = 10         # 每次查询最大比赛数量
-max_teams_in_ranking = 30          # 战队排名最大数量
-max_results_per_query = 20         # 每次查询最大结果数量
-default_query_days = 1             # 默认查询天数
+[display]
+# 默认显示的比赛数量
+default_matches = 5
 
-# 功能开关
-enable_mock_data_fallback = true   # 启用模拟数据回退(推荐开启)
-enable_caching = true              # 启用缓存机制
-enable_detailed_logging = true     # 启用详细日志
+# 默认显示的排名数量
+default_rankings = 10
 
-# 模拟数据配置
-mock_live_matches = 3              # 模拟实时比赛数量
-mock_team_count = 5                # 模拟战队排名数量
-mock_results_count = 3             # 模拟比赛结果数量
+# 默认显示的结果数量
+default_results = 10
 
-# 工具响应配置
-context_depth_default = "basic"    # 默认上下文深度
-include_match_ratings = true       # 包含比赛重要程度
-show_live_scores = true            # 显示实时比分
-show_ranking_changes = true        # 显示排名变化
+# ============== 实时数据配置 ==============
+[live_data]
+# 是否启用实时数据功能
+# 启用后可以获取更准确的实时比分
+enabled = false
+
+# 实时数据提供者
+# 可选值: "playwright", "bo3gg", "pandascore"
+# - playwright: 使用 Playwright 模拟浏览器，获取 HLTV 实时数据（需要安装 playwright）
+# - bo3gg: 使用 BO3.gg API，免费但覆盖范围有限
+# - pandascore: 使用 PandaScore API，需要 API token，覆盖主流赛事
+provider = "bo3gg"
+
+# 当实时数据源无数据时，是否回退到 HLTV 静态数据
+fallback_to_hltv = true
+
+# 实时数据刷新间隔（秒）
+# 建议不要设置太低，避免被限流
+refresh_interval = 10
+
+[live_data.playwright]
+# Playwright 配置（仅当 provider = "playwright" 时生效）
+# 是否使用无头模式
+headless = true
+
+# 浏览器类型: chromium, firefox, webkit
+browser = "chromium"
+
+# 页面加载超时（秒）
+timeout = 30
+
+[live_data.bo3gg]
+# BO3.gg API 配置（仅当 provider = "bo3gg" 时生效）
+# 注意：BO3.gg 不覆盖所有比赛，部分小型赛事可能无数据
+
+[live_data.pandascore]
+# PandaScore API 配置（仅当 provider = "pandascore" 时生效）
+# 需要在 https://developers.pandascore.co/ 注册获取 API token
+# 免费版限制：1000 请求/小时，不包含回合比分
+api_token = ""

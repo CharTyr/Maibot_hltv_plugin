@@ -1,266 +1,161 @@
 # CS2/CSGO HLTV Plugin for MaiBot
 
-> 🛠️ **CS2/CSGO电竞数据工具插件** - 为MaiBot提供CS2/CSGO相关的上下文数据查询工具
+> 🎮 **CS2/CSGO电竞数据工具插件** - 开箱即用，支持可选实时数据源
 
-> 重要说明（v3.0.0）
->
-> - 无法绕过 HLTV.org 的反爬虫，不进行任何自动化抓取。
-> - 不提供模拟/伪造数据；当受限时按原样返回空数据，并给出官方渠道指引。
-> - 推荐通过 HLTV 官网/官方App/官方社媒 或 Steam 内置途径查看实时信息。
-> - 本插件仅提供工具能力，不主动发送消息。
+## v5.1.0 特性
 
-## 🌟 核心特性
+- ✅ **开箱即用** - 无需额外服务，插件直接集成爬虫
+- ✅ **绕过 Cloudflare** - 使用 `curl_cffi` 模拟真实浏览器
+- ✅ **丰富数据** - 比赛、排名、Scoreboard、选手统计
+- ✅ **智能缓存** - 自动缓存数据，减少请求
+- ✅ **可选实时数据** - 支持 Playwright、BO3.gg、PandaScore 三种实时数据源
 
-### 🔧 纯工具模式
-- **数据提供**: 专注于为麦麦提供CS2/CSGO相关的上下文数据
-- **无主动回复**: 不会主动发送消息或邀请语句
-- **上下文支持**: 仅作为工具为麦麦的回复提供数据支持
+## 安装
 
-### 📊 全面数据查询
-- **选手信息**: 详细的选手统计数据（Rating、ADR、KAST、KPR等）
-- **战队资料**: 战队排名、成员构成、历史表现
-- **比赛数据**: 实时比赛状态、赛程安排、历史战绩
+### 1. 安装基础依赖
 
-### 🔴 实时比赛监控
-- **Live状态**: 获取进行中比赛的实时信息
-- **即时更新**: 比分变化、地图进度、关键时刻
-- **事件检测**: 识别重要比赛事件和时刻的最新信息
-- **智能讨论参与**: 根据讨论类型提供相应的数据和分析
-- **比赛事件检测**: 识别比分变化、比赛开始/结束等重要时刻
-- **事件通知系统**: 重要比赛事件发生时主动通知
+```bash
+pip install curl_cffi beautifulsoup4 lxml
+```
 
-### 🧠 智能上下文分析
-- **自动信息提取**: 从聊天内容中智能识别相关信息需求
-- **多类型查询**: 支持选手、战队、比赛等多种查询类型
-- **缓存优化**: 智能缓存机制，提升响应速度和用户体验
+### 2. 安装可选实时数据依赖（按需）
 
-## 🛠️ 技术架构
+```bash
+# BO3.gg (推荐，免费)
+pip install cs2api
 
-### 📡 数据与行为
-- 本版本不对 HLTV.org 发起自动抓取请求。
-- 当用户请求 HLTV 数据时，若受反爬策略限制，将返回空结果与提示信息。
-- 提供官方渠道链接，便于用户自行查看：
-  - https://www.hltv.org/matches
-  - https://www.hltv.org/ranking/teams
-  - https://www.hltv.org/results
+# PandaScore (需要 API token)
+pip install aiohttp
 
-### 💾 智能缓存系统
-- **多层级缓存**: 选手、战队、比赛数据分别缓存
-- **TTL机制**: 可配置的缓存过期时间
-- **内存优化**: 自动清理过期缓存，避免内存泄漏
+# Playwright (需要安装浏览器)
+pip install playwright
+playwright install chromium
+```
 
-### ⚡ 事件检测引擎
-- **实时监控**: 持续监控比赛状态变化
-- **事件分类**: 比分变化、比赛开始/结束、重要时刻识别
-- **重要性评分**: 1-5级事件重要性自动评估
-- **历史记录**: 保留最近100个事件的历史记录
+### 3. 复制插件
 
-### 🔧 插件组件架构
-- **10个核心组件**: 5个工具 + 4个动作 + 1个插件主体
-- **模块化设计**: 各功能模块独立，易于维护和扩展
-- **配置驱动**: 丰富的配置选项，支持功能开关和参数调整
+将 `Maibot_hltv_plugin` 文件夹复制到 MaiBot 的 `plugins/` 目录。
 
-## 📋 插件组件详解
+### 4. 配置（可选）
 
-### 🔧 核心工具 (Tools)
-1. **GetCS2ContextInfoTool** - 智能上下文信息提取
-   - 自动从聊天内容提取CS2相关关键词
-   - 提供选手、战队、比赛信息作为回复参考
-   - 支持多种查询类型和智能匹配
+复制 `config_template.toml` 为 `config.toml`，按需修改配置。
 
-2. **GetLiveMatchStatusTool** - 实时比赛状态查询
-   - 获取进行中和即将开始的比赛信息
-   - 支持关键词过滤和时间窗口设置
-   - 提供详细的比赛状态和时间信息
+### 5. 重启 MaiBot
 
-3. **DetectMatchEventsTool** - 比赛事件检测
-   - 识别比分变化、比赛开始/结束等重要事件
-   - 事件重要性自动评分（1-5级）
-   - 支持时间窗口和重要性阈值过滤
+插件会自动加载。
 
-4. **GetPlayerInfoTool** - 选手信息查询
-   - 详细的选手统计数据（Rating、ADR、KAST等）
-   - 支持模糊匹配和多选手查询
-   - 可选择是否包含详细统计信息
+## 实时数据配置
 
-5. **GetTeamInfoTool** - 战队信息查询
-   - 战队成员构成和基本信息
-   - 近期表现和历史战绩
-   - 支持战队名称模糊匹配
+默认情况下，插件使用 HLTV 静态数据（页面加载时的数据）。如需更准确的实时数据，可以启用以下数据源：
 
-### 🎮 内部检测动作 (Actions)
-1. **LiveMatchDiscussionAction** - 比赛讨论检测
-   - 检测群聊中的比赛讨论（仅记录，不回复）
-   - 为麦麦提供讨论上下文信息
-   - 识别讨论意图和相关战队
+### 方案对比
 
-2. **MatchEventNotificationAction** - 比赛事件检测
-   - 检测重要比赛事件（仅记录，不通知）
-   - 为麦麦提供事件上下文数据
-   - 支持事件重要性评估
+| 数据源 | 优点 | 缺点 | 推荐场景 |
+|--------|------|------|----------|
+| **HLTV 静态** | 覆盖所有比赛，无需配置 | 数据可能延迟 | 默认使用 |
+| **BO3.gg** | 免费，有选手实时数据 | 覆盖范围有限 | 主流赛事 |
+| **PandaScore** | 专业 API，数据准确 | 需要 token，免费版无回合比分 | 商业应用 |
+| **Playwright** | 获取真实实时数据 | 资源消耗大，需要浏览器 | 高精度需求 |
 
-3. **CS2TopicDetectionAction** - CS2话题检测
-   - 识别CS2/CSGO相关话题（仅记录，不回复）
-   - 为麦麦提供话题上下文信息
-   - 支持多种话题类型识别
+### 配置示例
 
-4. **LiveMatchMonitorAction** - 比赛监控状态记录
-   - 记录比赛关注请求（仅记录，不监控）
-   - 为麦麦提供监控上下文信息
-
-## ⚙️ 配置选项
-
-（本版本无外部API配置项）
-
-（本版本无抓取缓存配置项）
-
-### 工具配置
 ```toml
-[tools]
-max_results_per_query = 5          # 每次查询最大结果数
-enable_detailed_stats = true       # 启用详细统计数据
-enable_event_detection = true      # 启用事件检测功能
-```
-
-## 🚀 使用示例
-
-### 工具数据输出格式
-
-#### 选手信息工具输出
-```
-选手: ZywOo (Mathieu Herbaut) | 战队: Vitality | 国家: France | 年龄: 21
-统计: Rating 1.33 | Impact 1.45 | DPR 0.65 | ADR 85.2 | KAST 76.8% | KPR 0.84
-```
-
-#### 战队信息工具输出
-```
-战队: Vitality | 排名: #1 | 国家: France
-队员: ZywOo (France), apEX (France), dupreeh (Denmark), Magisk (Denmark), Spinx (Israel)
-```
-
-#### 实时比赛状态工具输出（受限场景）
-```
-由于HLTV反爬虫限制，无法获取实时比赛数据。请访问 https://www.hltv.org/matches 查看最新比赛信息。
-```
-
-（本版本不提供自动事件检测/主动通知能力）
-
-#### 上下文信息工具输出
-```
-选手: s1mple (Oleksandr Kostyliev) | 战队: Navi | 国家: Ukraine | 年龄: 25
-战队: Navi | 排名: #3 | 国家: Ukraine
-进行中: Navi vs G2 | IEM Katowice 2024 | 08-20 14:30 | 比分: 12-8
-```
-
-## 📦 安装与部署
-
-### 系统要求
-- **MaiBot版本**: >= 0.10.0
-- **Python版本**: >= 3.8
-- **依赖包**: 无强制第三方依赖（诚实版不进行抓取）
-- **运行模式**: 纯工具模式（无主动消息）
-
-### 安装步骤
-1. **下载插件**
-   ```bash
-   git clone https://github.com/CharTyr/Maibot_hltv_plugin.git
-   cd Maibot_hltv_plugin
-   ```
-
-2. 无需安装额外依赖（若你仅使用诚实版工具能力）
-
-3. **部署插件**
-   ```bash
-   cp -r cs2_hltv_plugin /path/to/MaiBot/plugins/
-   ```
-
-4. **重启MaiBot**
-   ```bash
-   # 重启MaiBot服务
-   systemctl restart maibot  # 或其他重启方式
-   ```
-
-5. **验证安装**
-   - 查看MaiBot日志确认插件加载成功
-   - 工具将在后台为麦麦提供数据支持
-
-### 配置文件
-插件可使用 `config_template.toml` 作为参考生成 `config.toml`。
-- 若 `config.toml` 由运行环境或部署脚本自动生成，请勿提交至仓库（本仓库已在 `.gitignore` 中忽略）。
-- 可在 README 或部署说明中明确告知：`config.toml` 仅在本地/部署环境存在。
-
-## 🔧 开发与测试
-
-### 测试
-本版本不再包含本地测试脚本。请在集成的 MaiBot 环境中通过工具调用进行验证。
-
-### 测试覆盖
-- ✅ 纯工具模式验证
-- ✅ 受限场景下的用户引导信息
-
-### 性能指标
-- 诚实版不进行网络抓取，无相关 API 性能指标
-
-## ⚙️ 配置说明
-
-### 基本配置
-```toml
-[plugin]
-name = "cs2_hltv_plugin"
-version = "3.0.0"
+[live_data]
 enabled = true
+provider = "bo3gg"  # 或 "pandascore", "playwright"
+fallback_to_hltv = true
+
+[live_data.pandascore]
+api_token = "your_token_here"
 ```
 
-（根据需要可在未来扩展工具级别的响应开关）
+## 工具列表
 
-## 📦 依赖要求
+| 工具 | 说明 |
+|------|------|
+| `GetMatchesTool` | 获取比赛列表（即将开始/进行中） |
+| `GetMatchDetailTool` | 获取比赛详情（比分、地图、Veto） |
+| `GetMapStatsTool` | 获取地图 Scoreboard（K/D/A、ADR、Rating） |
+| `GetMatchResultsTool` | 获取最近比赛结果 |
+| `GetTeamRankingsTool` | 获取战队世界排名 |
+| `GetTeamInfoTool` | 获取战队详细信息 |
+| `GetLiveMatchTool` | 获取正在进行的比赛（支持实时数据） |
+| `GetLiveScoreTool` | 获取指定比赛实时比分 |
 
-### Python 依赖
-- 无（诚实版不进行外部抓取）
+## 示例输出
 
-### MaiBot 版本要求
-- 最低版本: 0.10.0
+### 实时比分
+```
+🔴 实时比分 [bo3gg]
 
-## 🔧 安装指南
+🎮 Galaxy vs WeWillWin
+━━━━━━━━━━━━━━━━━━━━
+📊 地图: 0 - 0 (BO3)
+🗺️ 当前: Dust2
+🎯 回合: 10 - 6
+⚖️ 比分持平
+━━━━━━━━━━━━━━━━━━━━
+🏆 kleverr A Lyga Season 2 Finals
+```
 
-1. 将插件文件夹复制到 MaiBot 的 `plugins/` 目录下
-2. 重启 MaiBot
-3. 在配置文件中启用插件
+### Scoreboard
+```
+📊 Ancient Scoreboard
+🏆 FaZe 5 - 13 Natus Vincere
+📅 StarLadder Budapest Major 2025
 
-## 🐛 故障排除
+【FaZe】
+选手         K   A   D   ADR  KAST Rating
+---------------------------------------------
+jcobbb      10   4  11  72.6   61%   0.83
+karrigan     8   6  14  60.3   67%   0.80
+broky       10   5  13  58.2   72%   0.73
+```
 
-### 常见问题
+## 数据来源
 
-**Q: 插件无法获取数据**
-A: HLTV.org 反爬虫限制导致无法自动获取数据是预期行为。请使用 README 中提供的官方渠道链接查看。
+- **HLTV.org** - 主要数据源，覆盖所有比赛
+- **BO3.gg** - 可选实时数据源
+- **PandaScore** - 可选实时数据源
 
-**Q: 能否自动抓取 HLTV 数据？**
-A: 出于合规与稳定性考虑，v3 诚实版不进行抓取，也不尝试绕过反爬虫。
+## 缓存策略
 
-**Q: 选手/战队搜索不到**
-A: 请通过 HLTV 官方渠道进行检索与查看。
+| 数据类型 | 缓存时间 |
+|----------|----------|
+| 比赛列表 | 2 分钟 |
+| 比赛详情 | 1 分钟 |
+| 比赛结果 | 10 分钟 |
+| 战队排名 | 1 小时 |
+| 选手信息 | 1 小时 |
 
-### 日志查看
-插件使用标准的 Python logging 模块，日志级别包括：
-- INFO: API请求成功信息
-- WARNING: API请求失败警告
-- ERROR: 请求超时或异常错误
+## 文件结构
 
-## 🤝 贡献指南
+```
+Maibot_hltv_plugin/
+├── plugin.py           # 插件主文件（工具定义）
+├── hltv_scraper.py     # HLTV 爬虫模块
+├── live_providers.py   # 实时数据提供者
+├── _manifest.json      # 插件清单
+├── config_template.toml
+├── config.toml         # 用户配置（需自行创建）
+└── README.md
+```
 
-欢迎提交 Issue 和 Pull Request 来改进这个插件！
+## 故障排除
 
-### 开发环境设置
-1. Fork 项目仓库
-2. 创建功能分支
-3. 进行开发和测试
-4. 提交 Pull Request
+### 依赖未安装
+```
+❌ HLTV 爬虫依赖未安装。请运行: pip install curl_cffi beautifulsoup4 lxml
+```
 
-## 📄 许可证
+### 实时数据不可用
+- BO3.gg 可能不覆盖小型赛事
+- PandaScore 需要有效的 API token
+- 启用 `fallback_to_hltv = true` 可回退到 HLTV 数据
 
-本插件使用 GPL-v3.0-or-later 许可证。
+### 请求被拦截
+插件会自动重试最多 3 次。如果仍然失败，可能是临时限流，稍后再试。
 
-## 🙏 致谢
+## 许可证
 
-- HLTV.org 官方网站与服务
-- MaiBot 开发团队的插件系统支持
+GPL-v3.0-or-later
