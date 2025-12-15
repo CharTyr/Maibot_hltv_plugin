@@ -1,8 +1,8 @@
 {
   "manifest_version": 1,
-  "name": "CS2/CSGO HLTV 信息插件 (CS2/CSGO HLTV Info Plugin)",
-  "version": "1.0.0",
-  "description": "智能检测CS2/CSGO话题讨论，提供选手数据、比赛信息和实时比赛监控功能",
+  "name": "CS2/CSGO HLTV 信息插件",
+  "version": "5.2.0",
+  "description": "开箱即用的CS2数据查询插件，支持比赛、战队、选手数据查询和实时比分",
   "author": {
     "name": "MaiBot Plugin Developer",
     "url": "https://github.com/MaiM-with-u"
@@ -18,7 +18,6 @@
   "categories": ["Gaming", "Information", "Sports"],
   
   "default_locale": "zh-CN",
-  "locales_path": "_locales",
   
   "plugin_info": {
     "is_built_in": false,
@@ -26,37 +25,57 @@
     "components": [
       {
         "type": "action",
-        "name": "cs2_topic_detection",
-        "description": "检测CS2/CSGO相关话题讨论"
+        "name": "hltv_get_matches",
+        "description": "获取CS2比赛列表"
       },
       {
-        "type": "action", 
-        "name": "live_match_monitor",
-        "description": "监控进行中的比赛并提供实时数据"
+        "type": "action",
+        "name": "hltv_get_match_detail",
+        "description": "获取比赛详情和比分"
       },
       {
-        "type": "tool",
-        "name": "get_player_info",
-        "description": "获取选手详细信息和统计数据"
+        "type": "action",
+        "name": "hltv_get_map_stats",
+        "description": "获取地图Scoreboard数据"
       },
       {
-        "type": "tool",
-        "name": "get_team_info", 
-        "description": "获取战队信息和排名"
+        "type": "action",
+        "name": "hltv_get_results",
+        "description": "获取比赛结果"
       },
       {
-        "type": "tool",
-        "name": "get_match_info",
-        "description": "获取比赛信息和结果"
+        "type": "action",
+        "name": "hltv_get_rankings",
+        "description": "获取战队世界排名"
+      },
+      {
+        "type": "action",
+        "name": "hltv_get_team_info",
+        "description": "获取战队详细信息"
+      },
+      {
+        "type": "action",
+        "name": "hltv_get_live_matches",
+        "description": "获取正在进行的比赛"
+      },
+      {
+        "type": "action",
+        "name": "hltv_get_live_score",
+        "description": "获取实时比分"
       }
     ],
     "features": [
-      "智能CS2/CSGO话题检测",
-      "选手数据和统计信息查询",
-      "战队排名和成员信息",
-      "实时比赛监控和数据推送",
-      "比赛结果和历史记录查询",
-      "数据缓存和API限流保护"
+      "开箱即用，无需额外配置",
+      "绕过Cloudflare保护获取HLTV数据",
+      "比赛列表和详情查询",
+      "地图Scoreboard数据（K/D/A/ADR/Rating）",
+      "战队排名和选手阵容",
+      "实时比赛比分追踪"
+    ],
+    "python_dependencies": [
+      "curl_cffi",
+      "beautifulsoup4",
+      "lxml"
     ]
   }
 }
