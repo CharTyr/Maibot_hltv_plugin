@@ -23,6 +23,7 @@ from .hltv_scraper import scraper, live_manager, HAS_DEPENDENCIES
 
 logger = get_logger("HLTVPlugin")
 
+_LLM_JUDGE = getattr(ActionActivationType, "LLM_JUDGE", ActionActivationType.ALWAYS)
 
 # ============== Action 组件 ==============
 
@@ -33,7 +34,7 @@ class GetMatchesAction(BaseAction):
     action_name = "hltv_get_matches"
     action_description = "获取CS2即将进行和正在进行的比赛列表，包括时间、战队、赛事信息"
 
-    activation_type = ActionActivationType.LLM_JUDGE
+    activation_type = _LLM_JUDGE
     parallel_action = True
 
     action_parameters = {
@@ -95,7 +96,7 @@ class GetMatchDetailAction(BaseAction):
     action_name = "hltv_get_match_detail"
     action_description = "获取CS2比赛的详细信息，包括比分、地图、Veto等"
 
-    activation_type = ActionActivationType.LLM_JUDGE
+    activation_type = _LLM_JUDGE
     parallel_action = True
 
     action_parameters = {
@@ -174,7 +175,7 @@ class GetMapStatsAction(BaseAction):
     action_name = "hltv_get_map_stats"
     action_description = "获取CS2比赛某张地图的详细统计数据（Scoreboard），包括选手K/D/A、ADR、Rating、KAST等"
 
-    activation_type = ActionActivationType.LLM_JUDGE
+    activation_type = _LLM_JUDGE
     parallel_action = True
 
     action_parameters = {
@@ -260,7 +261,7 @@ class GetMatchResultsAction(BaseAction):
     action_name = "hltv_get_results"
     action_description = "获取最近的CS2比赛结果"
 
-    activation_type = ActionActivationType.LLM_JUDGE
+    activation_type = _LLM_JUDGE
     parallel_action = True
 
     action_parameters = {
@@ -321,7 +322,7 @@ class GetTeamRankingsAction(BaseAction):
     action_name = "hltv_get_rankings"
     action_description = "获取CS2战队世界排名"
 
-    activation_type = ActionActivationType.LLM_JUDGE
+    activation_type = _LLM_JUDGE
     parallel_action = True
 
     action_parameters = {
@@ -367,7 +368,7 @@ class GetTeamInfoAction(BaseAction):
     action_name = "hltv_get_team_info"
     action_description = "获取CS2战队的详细信息，包括排名、积分、选手阵容等"
 
-    activation_type = ActionActivationType.LLM_JUDGE
+    activation_type = _LLM_JUDGE
     parallel_action = True
 
     action_parameters = {
@@ -434,7 +435,7 @@ class GetLiveMatchAction(BaseAction):
     action_name = "hltv_get_live_matches"
     action_description = "获取当前正在进行的CS2直播比赛的实时数据，包括地图比分和回合比分"
 
-    activation_type = ActionActivationType.LLM_JUDGE
+    activation_type = _LLM_JUDGE
     parallel_action = True
 
     action_parameters = {
@@ -503,7 +504,7 @@ class GetLiveScoreAction(BaseAction):
     action_name = "hltv_get_live_score"
     action_description = "获取指定战队正在进行的比赛的实时比分"
 
-    activation_type = ActionActivationType.LLM_JUDGE
+    activation_type = _LLM_JUDGE
     parallel_action = True
 
     action_parameters = {
