@@ -1,0 +1,32 @@
+{
+  "manifest_version": 2,
+  "version": "6.0.0",
+  "name": "CS2/CSGO HLTV 电竞信息插件",
+  "description": "开箱即用的CS2数据查询插件，支持比赛、战队、选手数据查询和实时比分",
+  "author": {
+    "name": "CharTyr",
+    "url": "https://github.com/CharTyr/Maibot_hltv_plugin"
+  },
+  "license": "GPL-v3.0-or-later",
+  "urls": {
+    "repository": "https://github.com/CharTyr/Maibot_hltv_plugin",
+    "homepage": "https://github.com/CharTyr/Maibot_hltv_plugin"
+  },
+  "host_application": {
+    "min_version": "1.0.0",
+    "max_version": "1.0.0"
+  },
+  "sdk": {
+    "min_version": "2.0.0",
+    "max_version": "2.99.99"
+  },
+  "dependencies": [],
+  "capabilities": [
+    "config.get"
+  ],
+  "i18n": {
+    "default_locale": "zh-CN",
+    "supported_locales": ["zh-CN"]
+  },
+  "id": "chartyr.hltv-plugin"
+}

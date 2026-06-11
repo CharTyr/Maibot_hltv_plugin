@@ -1,0 +1,8 @@
+# 必需依赖
+curl_cffi>=0.5.0
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+
+# 可选依赖（实时数据源）
+# cs2api          # BO3.gg 实时数据
+# aiohttp>=3.8.0  # PandaScore API

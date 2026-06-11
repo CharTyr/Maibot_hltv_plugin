@@ -1,0 +1,38 @@
+# CS2 HLTV 插件配置
+
+[plugin]
+enabled = true
+config_version = "6.1.0"
+
+[cache]
+# 比赛数据缓存时间（秒）
+matches_ttl = 120
+# 排名数据缓存时间（秒）
+rankings_ttl = 3600
+# 结果数据缓存时间（秒）
+results_ttl = 600
+
+[display]
+# 默认显示的比赛数量
+default_matches = 5
+# 默认显示的排名数量
+default_rankings = 10
+# 默认显示的结果数量
+default_results = 10
+
+[live_data]
+# 是否启用实时数据功能
+enabled = false
+# 实时数据提供者: "bo3gg" 或 "pandascore"
+provider = "bo3gg"
+# 当实时数据源无数据时，是否回退到 HLTV 静态数据
+fallback_to_hltv = true
+# PandaScore API token（仅当 provider = "pandascore" 时需要）
+pandascore_token = ""
+
+[tavily]
+api_key = ""
+
+[tavily]
+# Tavily API Key (绕过 Cloudflare 获取 HLTV 页面)
+api_key = "your_tavily_api_key_here"
