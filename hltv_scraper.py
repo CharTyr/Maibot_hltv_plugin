@@ -150,10 +150,22 @@ class HLTVScraper:
             "team": 1800,
         }
         self._tavily_api_key: str = ""
+        self._tavily_base_url: str = "https://api.tavily.com"
+        self._jina_base_url: str = "https://r.jina.ai"
 
     def set_tavily_key(self, key: str):
         """设置 Tavily API Key"""
         self._tavily_api_key = key
+
+    def set_tavily_base_url(self, url: str):
+        """设置 Tavily 兼容 API 地址（支持中转）"""
+        if url:
+            self._tavily_base_url = url.rstrip("/")
+
+    def set_jina_base_url(self, url: str):
+        """设置 Jina Reader 地址（主抓取通道）"""
+        if url:
+            self._jina_base_url = url.rstrip("/")
 
     def _get_cache(self, key: str, cache_type: str = "matches") -> Optional[Any]:
         """获取缓存"""
@@ -168,56 +180,105 @@ class HLTVScraper:
         """设置缓存"""
         self._cache[key] = (value, datetime.now())
 
+    async def _fetch_via_jina(self, url: str) -> Optional[str]:
+        """通过 Jina Reader 获取页面原始 HTML（主通道，免 key 过 Cloudflare）"""
+        loop = asyncio.get_event_loop()
+
+        def _do():
+            resp = std_requests.get(
+                f"{self._jina_base_url}/{url}",
+                headers={"x-respond-with": "html", "User-Agent": "Mozilla/5.0"},
+                timeout=45,
+            )
+            resp.raise_for_status()
+            return resp.text
+
+        try:
+            text = await loop.run_in_executor(None, _do)
+            if text and "<a" in text:
+                return text
+            logger.warning(f"Jina 返回内容异常 (长度={len(text or '')}): {url}")
+        except Exception as e:
+            logger.warning(f"Jina Reader 抓取失败: {e}: {url}")
+        return None
+
+    async def _fetch_via_tavily(self, url: str) -> Optional[str]:
+        """通过 Tavily Extract API 获取页面（备选通道，支持中转地址）"""
+        if not self._tavily_api_key:
+            return None
+        loop = asyncio.get_event_loop()
+        try:
+            response = await loop.run_in_executor(
+                None,
+                lambda: std_requests.post(
+                    f"{self._tavily_base_url}/extract",
+                    json={
+                        "api_key": self._tavily_api_key,
+                        "urls": [url],
+                        "format": "html_tags",
+                    },
+                    timeout=45,
+                ),
+            )
+            if response.status_code == 200:
+                data = response.json()
+                results = data.get("results", [])
+                if results:
+                    raw = results[0].get("raw_content", "")
+                    if raw:
+                        return raw
+                failed = data.get("failed", [])
+                if failed:
+                    logger.warning(f"Tavily extract 失败: {failed}")
+            else:
+                logger.warning(f"Tavily API 返回 {response.status_code}: {url}")
+        except Exception as e:
+            logger.error(f"Tavily 请求错误: {e}")
+        return None
+
     async def _fetch(self, url: str, retries: int = 2) -> Optional[str]:
-        """通过 Tavily Extract API 获取页面 HTML（自动过 Cloudflare）"""
+        """获取页面 HTML：Jina Reader 优先，Tavily 兜底"""
         if not HAS_DEPENDENCIES:
             return None
-        if not self._tavily_api_key:
-            logger.warning("Tavily API Key 未配置，无法获取页面")
-            return None
 
-        for attempt in range(retries):
-            try:
-                loop = asyncio.get_event_loop()
-                response = await loop.run_in_executor(
-                    None,
-                    lambda: std_requests.post(
-                        "https://api.tavily.com/extract",
-                        json={"api_key": self._tavily_api_key, "urls": [url]},
-                        timeout=45,
-                    ),
-                )
-                if response.status_code == 200:
-                    data = response.json()
-                    results = data.get("results", [])
-                    if results:
-                        raw = results[0].get("raw_content", "")
-                        if raw:
-                            return raw
-                    failed = data.get("failed", [])
-                    if failed:
-                        logger.warning(f"Tavily extract 失败: {failed}")
-                else:
-                    logger.warning(f"Tavily API 返回 {response.status_code}: {url}")
-            except Exception as e:
-                logger.error(f"Tavily 请求错误 (尝试 {attempt + 1}/{retries}): {e}")
+        html = await self._fetch_via_jina(url)
+        if html:
+            return html
 
-            if attempt < retries - 1:
-                await asyncio.sleep(1)
+        if self._tavily_api_key:
+            logger.info(f"Jina 失败，回退 Tavily: {url}")
+            for attempt in range(retries):
+                html = await self._fetch_via_tavily(url)
+                if html:
+                    return html
+                if attempt < retries - 1:
+                    await asyncio.sleep(1)
 
+        logger.warning(f"所有抓取通道均失败: {url}")
         return None
+    async def _get_matches_page(self) -> Optional[str]:
+        """获取 /matches 页面 HTML（带独立缓存，供列表与直播查询共享，避免重复抓取）"""
+        cached = self._get_cache("matches_page_html", "matches")
+        if cached:
+            return cached
+        html = await self._fetch(f"{self.BASE_URL}/matches")
+        if html:
+            self._set_cache("matches_page_html", html)
+        return html
+
     async def get_matches(self) -> List[Dict[str, Any]]:
         """获取比赛列表"""
         cached = self._get_cache("matches_list", "matches")
         if cached:
             return cached
 
-        html = await self._fetch(f"{self.BASE_URL}/matches")
+        html = await self._get_matches_page()
         if not html:
             return []
 
         soup = BeautifulSoup(html, "lxml")
         matches = []
+        seen_ids = set()
 
         for link in soup.select("a.match-teams"):
             try:
@@ -227,6 +288,8 @@ class HLTVScraper:
 
                 parts = href.split("/")
                 match_id = parts[2] if len(parts) > 2 else ""
+                if not match_id or match_id in seen_ids:
+                    continue
 
                 # 队名在 .match-teamname 或 .match-team 下
                 team_name_elems = link.select(".match-teamname")
@@ -238,13 +301,34 @@ class HLTVScraper:
                 if not team1 or not team2:
                     continue
 
-                parent = link.parent
-                time_elem = parent.select_one(".match-time") if parent else None
-                match_time = time_elem.get_text(strip=True) if time_elem else ""
+                # 容器向上取到 .match 层找时间与赛事信息
+                container = link.parent.parent if link.parent else None
+                match_time = ""
+                if container:
+                    time_elem = container.select_one(".match-time[data-unix]")
+                    if time_elem:
+                        try:
+                            ts = int(time_elem.get("data-unix", "0")) / 1000
+                            # 服务器时区为 Asia/Shanghai
+                            match_time = datetime.fromtimestamp(ts).strftime("%m-%d %H:%M")
+                        except (ValueError, OSError, OverflowError):
+                            match_time = time_elem.get_text(strip=True)
+                    if not match_time:
+                        fallback = container.select_one(".match-time")
+                        if fallback:
+                            match_time = fallback.get_text(strip=True)
 
-                event = "-".join(parts[3:]).replace("-", " ").title() if len(parts) > 3 else ""
+                event = ""
+                if container:
+                    event_elem = container.select_one("[data-event-headline]")
+                    if event_elem:
+                        event = event_elem.get("data-event-headline", "").strip()
+                if not event:
+                    event = "-".join(parts[3:]).replace("-", " ").title() if len(parts) > 3 else ""
+
                 is_live = "live" in str(link.get("class", [])).lower()
 
+                seen_ids.add(match_id)
                 matches.append({
                     "match_id": match_id,
                     "team1": team1,
@@ -255,7 +339,7 @@ class HLTVScraper:
                     "url": f"{self.BASE_URL}{href}",
                 })
             except Exception as e:
-                logger.debug(f"解析比赛失败: {e}")
+                logger.warning(f"解析比赛失败: {e}")
 
         self._set_cache("matches_list", matches)
         return matches
@@ -269,7 +353,7 @@ class HLTVScraper:
         if cached:
             return cached
 
-        html = await self._fetch(f"{self.BASE_URL}/matches")
+        html = await self._get_matches_page()
         if not html:
             return []
 
@@ -280,17 +364,24 @@ class HLTVScraper:
         if not live_section:
             return []
 
+        parsed = []
         for match_container in live_section.select(".live-match-container"):
             try:
                 live_match = self._parse_live_match(match_container)
                 if live_match:
-                    if fetch_details and live_match.url:
-                        detailed = await self._fetch_live_match_detail(live_match)
-                        if detailed:
-                            live_match = detailed
-                    live_matches.append(live_match)
+                    parsed.append(live_match)
             except Exception as e:
-                logger.debug(f"解析直播比赛失败: {e}")
+                logger.warning(f"解析直播比赛失败: {e}")
+
+        if parsed and fetch_details:
+            details = await asyncio.gather(
+                *(self._fetch_live_match_detail(m) for m in parsed),
+                return_exceptions=True,
+            )
+            for base, det in zip(parsed, details):
+                live_matches.append(det if isinstance(det, LiveMatch) else base)
+        else:
+            live_matches = parsed
 
         self._set_cache(cache_key, live_matches)
         return live_matches
@@ -520,7 +611,14 @@ class HLTVScraper:
 
             veto = []
             for veto_elem in soup.select(".veto-box .padding"):
-                veto.append(veto_elem.get_text(strip=True))
+                text = veto_elem.get_text(" ", strip=True)
+                # 页面源码里各步骤被压在一起 ("...Inferno2. Vitality...")，按编号步骤断开
+                protected = text.replace("Dust2", "Dust\u00a7")
+                steps = re.split(r"(?=\b\d+\.\s)", protected)
+                veto.extend(
+                    s.replace("Dust\u00a7", "Dust2").strip()
+                    for s in steps if s.strip()
+                )
 
             return MatchDetail(
                 match_id=match_id,

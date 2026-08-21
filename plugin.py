@@ -71,6 +71,21 @@ class TavilyConfig(PluginConfigBase):
     __ui_order__ = 4
 
     api_key: str = Field(default="", description="Tavily API Key (绕过 Cloudflare)")
+    base_url: str = Field(
+        default="https://api.tavily.com",
+        description="Tavily 兼容 API 地址 (中转站填中转地址)",
+    )
+
+
+class JinaConfig(PluginConfigBase):
+    """Jina Reader 配置。"""
+
+    __ui_label__ = "Jina Reader"
+    __ui_icon__ = "cloud"
+    __ui_order__ = 5
+
+    enabled: bool = Field(default=True, description="启用 Jina Reader 主抓取通道")
+    base_url: str = Field(default="https://r.jina.ai", description="Jina Reader 地址")
 
 
 class HLTVPluginConfig(PluginConfigBase):
@@ -81,6 +96,7 @@ class HLTVPluginConfig(PluginConfigBase):
     display: DisplayConfig = Field(default_factory=DisplayConfig)
     live_data: LiveDataConfig = Field(default_factory=LiveDataConfig)
     tavily: TavilyConfig = Field(default_factory=TavilyConfig)
+    jina: JinaConfig = Field(default_factory=JinaConfig)
 
 
 # ============== 实时数据管理器 ==============
@@ -175,10 +191,17 @@ class CS2HLTVPlugin(MaiBotPlugin):
             scraper._cache_ttl["rankings"] = self.config.cache.rankings_ttl
             scraper._cache_ttl["results"] = self.config.cache.results_ttl
 
-            # 注入 Tavily API Key
+            # 注入 Tavily API Key 与中转地址
             if self.config.tavily and self.config.tavily.api_key:
                 scraper.set_tavily_key(self.config.tavily.api_key)
-                self.ctx.logger.info("Tavily API Key 已配置")
+                scraper.set_tavily_base_url(getattr(self.config.tavily, "base_url", "") or "https://api.tavily.com")
+                self.ctx.logger.info("Tavily 已配置 (备选通道)")
+
+            # 注入 Jina Reader 主通道
+            jina_cfg = getattr(self.config, "jina", None)
+            if jina_cfg and getattr(jina_cfg, "enabled", True):
+                scraper.set_jina_base_url(jina_cfg.base_url)
+                self.ctx.logger.info(f"Jina Reader 主通道已启用 ({jina_cfg.base_url})")
 
             # 配置实时数据
             live_cfg = self.config.live_data

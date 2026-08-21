@@ -1,3 +1,8 @@
+> **⚠️ 2026-08-22 更新（v6.1.1）**：本文档以下内容基于 v1.0 时代，数据源已变更。
+> 现状：主通道 Jina Reader（r.jina.ai，返回原始 HTML 过 Cloudflare），备选 Tavily Extract（支持中转 base_url）；
+> vercel JSON API 已死。回合级比分来自详情页 .played 行解析；列表已按 match_id 去重、赛事名取自 data-event-headline、
+> 时间取自 data-unix 时间戳；直播详情并发抓取；页面 HTML 共享缓存。
+
 # CS2 HLTV插件项目交接文档
 
 ## 📋 项目基本信息

@@ -31,8 +31,11 @@ fallback_to_hltv = true
 pandascore_token = ""
 
 [tavily]
+# Tavily API Key (备选通道，支持中转站 base_url)
 api_key = ""
+base_url = "https://api.tavily.com"
 
-[tavily]
-# Tavily API Key (绕过 Cloudflare 获取 HLTV 页面)
-api_key = "your_tavily_api_key_here"
+[jina]
+# Jina Reader 主抓取通道 (免 key 过 Cloudflare，返回原始 HTML)
+enabled = true
+base_url = "https://r.jina.ai"

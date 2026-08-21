@@ -14,7 +14,7 @@
   },
   "host_application": {
     "min_version": "1.0.0",
-    "max_version": "1.0.0"
+    "max_version": "1.99.99"
   },
   "sdk": {
     "min_version": "2.0.0",
@@ -26,7 +26,9 @@
   ],
   "i18n": {
     "default_locale": "zh-CN",
-    "supported_locales": ["zh-CN"]
+    "supported_locales": [
+      "zh-CN"
+    ]
   },
   "id": "chartyr.hltv-plugin"
 }
