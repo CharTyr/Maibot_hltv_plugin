@@ -1078,11 +1078,11 @@ class HLTVScraper:
 
         team_id, candidate_name, href = pick
         team_html = await self._fetch(f"{self.BASE_URL}{href}")
-        if team_html:
-            team = self._parse_team_page(team_html, team_id, candidate_name)
-        else:
-            team = TeamInfo(team_id=team_id, name=candidate_name)
+        if not team_html:
+            # 队主页失败只允许本次查询降级，不能把空资料缓存成事实。
+            return TeamInfo(team_id=team_id, name=candidate_name)
 
+        team = self._parse_team_page(team_html, team_id, candidate_name)
         self._set_cache(cache_key, team)
         return team
 
