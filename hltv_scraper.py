@@ -1,16 +1,18 @@
 """
 HLTV Scraper - 直接集成到插件中的爬虫模块
-使用 Tavily Extract API 获取页面，自动过 Cloudflare
+抓取通道：Jina Reader（主，返回 HTML）+ Tavily Extract（备）；主通道识别 Cloudflare 质询页并重试
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +25,18 @@ try:
 except ImportError as e:
     HAS_DEPENDENCIES = False
     logger.warning(f"HLTV 爬虫依赖未安装: {e}")
+
+
+# Jina 主通道偶发转发 Cloudflare 质询页（HTTP 200 的无数据页面），必须识别并从解析流程中剔除
+_CHALLENGE_MARKERS = ("<title>Just a moment", "challenges.cloudflare.com", "Attention Required")
+
+
+def _is_challenge_page(text: str) -> bool:
+    """识别 Cloudflare 质询/拦截页"""
+    if not text:
+        return False
+    head = text[:3000]
+    return any(marker in head for marker in _CHALLENGE_MARKERS)
 
 
 # ============== 数据模型 ==============
@@ -113,6 +127,10 @@ class TeamInfo:
     recent_results: List[str] = field(default_factory=list)
 
 
+class TeamSearchError(RuntimeError):
+    """战队搜索链路失败，而不是没有匹配到战队。"""
+
+
 @dataclass
 class PlayerInfo:
     """选手详细信息"""
@@ -152,6 +170,9 @@ class HLTVScraper:
         self._tavily_api_key: str = ""
         self._tavily_base_url: str = "https://api.tavily.com"
         self._jina_base_url: str = "https://r.jina.ai"
+        # 单个 URL 的总预算，避免 Jina/Tavily 重试时间无限叠加。
+        self._fetch_deadline_seconds = 20.0
+        self._request_timeout_seconds = 10.0
 
     def set_tavily_key(self, key: str):
         """设置 Tavily API Key"""
@@ -180,21 +201,30 @@ class HLTVScraper:
         """设置缓存"""
         self._cache[key] = (value, datetime.now())
 
-    async def _fetch_via_jina(self, url: str) -> Optional[str]:
-        """通过 Jina Reader 获取页面原始 HTML（主通道，免 key 过 Cloudflare）"""
+    async def _fetch_via_jina(self, url: str, no_cache: bool = False) -> Optional[str]:
+        """通过 Jina Reader 获取页面原始 HTML（主通道，免 key 过 Cloudflare）
+
+        no_cache=True 时绕过 Jina 内部缓存（重试专用，避免命中质询页等坏缓存条目）。
+        """
         loop = asyncio.get_event_loop()
+        headers = {"x-respond-with": "html", "User-Agent": "Mozilla/5.0"}
+        if no_cache:
+            headers["x-no-cache"] = "true"
 
         def _do():
             resp = std_requests.get(
                 f"{self._jina_base_url}/{url}",
-                headers={"x-respond-with": "html", "User-Agent": "Mozilla/5.0"},
-                timeout=45,
+                headers=headers,
+                timeout=self._request_timeout_seconds,
             )
             resp.raise_for_status()
             return resp.text
 
         try:
             text = await loop.run_in_executor(None, _do)
+            if text and _is_challenge_page(text):
+                logger.warning(f"Jina 返回 Cloudflare 质询页，作废本轮: {url}")
+                return None
             if text and "<a" in text:
                 return text
             logger.warning(f"Jina 返回内容异常 (长度={len(text or '')}): {url}")
@@ -217,7 +247,7 @@ class HLTVScraper:
                         "urls": [url],
                         "format": "html_tags",
                     },
-                    timeout=45,
+                    timeout=self._request_timeout_seconds,
                 ),
             )
             if response.status_code == 200:
@@ -237,26 +267,55 @@ class HLTVScraper:
         return None
 
     async def _fetch(self, url: str, retries: int = 3) -> Optional[str]:
-        """获取页面 HTML：Jina Reader 优先，Tavily 兜底"""
+        """获取页面 HTML，并把所有通道和重试限制在单 URL deadline 内。"""
         if not HAS_DEPENDENCIES:
             return None
 
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self._fetch_deadline_seconds
         jina_attempts = max(1, retries)
+
         for attempt in range(jina_attempts):
-            html = await self._fetch_via_jina(url)
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                break
+            try:
+                html = await asyncio.wait_for(
+                    self._fetch_via_jina(url, no_cache=(attempt > 0)),
+                    timeout=remaining,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"Jina 抓取达到 deadline: {url}")
+                break
             if html:
                 return html
             if attempt < jina_attempts - 1:
-                await asyncio.sleep(5)
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    break
+                await asyncio.sleep(min(5, remaining))
 
         if self._tavily_api_key:
             logger.info(f"Jina 失败，回退 Tavily: {url}")
-            for attempt in range(retries):
-                html = await self._fetch_via_tavily(url)
+            for attempt in range(max(0, retries)):
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    break
+                try:
+                    html = await asyncio.wait_for(
+                        self._fetch_via_tavily(url),
+                        timeout=remaining,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(f"Tavily 抓取达到 deadline: {url}")
+                    break
                 if html:
                     return html
                 if attempt < retries - 1:
-                    await asyncio.sleep(1)
+                    remaining = deadline - loop.time()
+                    if remaining <= 0:
+                        break
+                    await asyncio.sleep(min(1, remaining))
 
         logger.warning(f"所有抓取通道均失败: {url}")
         return None
@@ -1027,14 +1086,117 @@ class HLTVScraper:
     # ============== 搜索 ==============
 
     async def search_team(self, name: str) -> Optional[TeamInfo]:
-        """搜索战队"""
+        """搜索战队：先查世界排名榜；未命中时回退 HLTV 站内搜索（覆盖榜外战队）"""
         teams = await self.get_rankings(max_teams=100)
         name_lower = name.lower()
 
         for team in teams:
             if name_lower in team.name.lower():
                 return team
-        return None
+
+        return await self._search_team_site(name)
+
+    async def _search_team_site(self, name: str) -> Optional[TeamInfo]:
+        """通过 HLTV 站内搜索页查找榜外战队，并读取队主页资料"""
+        cache_key = f"team_search:{name.strip().lower()}"
+        cached = self._get_cache(cache_key, "team")
+        if isinstance(cached, TeamInfo):
+            return cached
+
+        search_html = await self._fetch(f"{self.BASE_URL}/search?query={quote(name)}")
+        if not search_html:
+            raise TeamSearchError(f"获取战队搜索页失败: {name}")
+
+        candidates = self._parse_search_candidates(search_html)
+        pick = self._pick_team_candidate(candidates, name)
+        if not pick:
+            return None
+
+        team_id, candidate_name, href = pick
+        team_html = await self._fetch(f"{self.BASE_URL}{href}")
+        if not team_html:
+            raise TeamSearchError(f"获取战队主页失败: {candidate_name}")
+
+        team = self._parse_team_page(team_html, team_id, candidate_name)
+        self._set_cache(cache_key, team)
+        return team
+
+    @staticmethod
+    def _parse_search_candidates(html: str) -> List[Tuple[str, str, str]]:
+        """解析站内搜索结果中的战队条目：(team_id, name, href)"""
+        soup = BeautifulSoup(html, "lxml")
+        candidates = []
+        for link in soup.select('a[data-result-type="TEAM"]'):
+            href = link.get("href", "")
+            team_id = link.get("data-result-id", "")
+            name = link.get_text(" ", strip=True)
+            if href.startswith("/team/") and team_id and name:
+                candidates.append((team_id, name, href))
+        return candidates
+
+    @staticmethod
+    def _pick_team_candidate(
+        candidates: List[Tuple[str, str, str]], name: str
+    ) -> Optional[Tuple[str, str, str]]:
+        """优先取精确同名条目，否则取搜索页第一条（已按相关度排序）"""
+        if not candidates:
+            return None
+        name_norm = name.strip().lower()
+        for candidate in candidates:
+            if candidate[1].strip().lower() == name_norm:
+                return candidate
+        return candidates[0]
+
+    def _parse_team_page(self, html: str, team_id: str, fallback_name: str) -> TeamInfo:
+        """解析队主页：名称、地区、世界排名与现役阵容"""
+        soup = BeautifulSoup(html, "lxml")
+
+        name_el = soup.select_one(".profile-team-name")
+        name = name_el.get_text(strip=True) if name_el else fallback_name
+
+        country_el = soup.select_one(".team-country")
+        country = country_el.get_text(" ", strip=True) if country_el else ""
+
+        rank = 0
+        for stat in soup.select(".profile-team-stat"):
+            stat_text = stat.get_text(" ", strip=True)
+            if stat_text.startswith("World ranking"):
+                rank_match = re.search(r"#(\d+)", stat_text)
+                if rank_match:
+                    rank = int(rank_match.group(1))
+                break
+
+        players: List[str] = []
+        for block in re.finditer(r'<script type="application/ld\+json">(.*?)</script>', html, re.S):
+            try:
+                data = json.loads(block.group(1))
+            except (ValueError, TypeError):
+                continue
+            if not isinstance(data, dict):
+                continue
+            data_type = data.get("@type")
+            if data_type != "SportsTeam" and not (isinstance(data_type, list) and "SportsTeam" in data_type):
+                continue
+            for athlete in data.get("athlete") or []:
+                nick = str(athlete.get("alternateName") or "").strip()
+                if nick and nick != "?" and nick not in players:
+                    players.append(nick)
+            if players:
+                break
+
+        if not players:
+            for nick_el in soup.select(".nickname-container .bold"):
+                nick = nick_el.get_text(strip=True)
+                if nick and nick != "?" and nick not in players:
+                    players.append(nick)
+
+        return TeamInfo(
+            team_id=team_id,
+            name=name,
+            rank=rank,
+            country=country,
+            players=players,
+        )
 
 
 # 全局实例

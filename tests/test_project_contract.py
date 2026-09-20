@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_RELEASE = "6.1.1"
+EXPECTED_RELEASE = "6.2.0"
 EXPECTED_CONFIG_SCHEMA = "6.1.0"
 
 
@@ -71,6 +71,8 @@ class ProjectContractTests(unittest.TestCase):
         self.assertIn("PandaScore", readme)
         self.assertNotIn("Playwright", readme)
         self.assertNotIn("Playwright", providers)
+        handover = (ROOT / "HANDOVER.md").read_text(encoding="utf-8")
+        self.assertNotIn("Playwright", handover)
 
     def test_current_docs_do_not_advertise_retired_stack(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
