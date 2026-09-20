@@ -2,9 +2,9 @@
 
 > 面向 MaiBot 的 CS2 / CS:GO 赛事资料工具。只在 Planner 明确调用时查询，不主动向群聊推送消息。
 
-**当前发布：v6.1.1**
+**当前发布：v6.2.0**
 
-它提供比赛列表、赛程详情、地图数据、赛果、世界排名、战队资料和实时比分查询。主数据来自 HLTV 页面；抓取链路优先使用 **Jina Reader** 读取页面 HTML，遇到不可用时回退 **Tavily Extract**。
+它提供比赛列表、赛程详情、地图数据、赛果、世界排名、战队资料和实时比分查询。主数据来自 HLTV 页面；抓取链路优先使用 **Jina Reader** 读取页面 HTML（自动识别 Cloudflare 质询页并重试，重试绕过 Jina 缓存），遇到不可用时回退 **Tavily Extract**。
 
 ## 安装
 
@@ -48,7 +48,7 @@ fi
 | `hltv_get_map_stats` | 查询单张地图的选手统计 |
 | `hltv_get_results` | 查询近期赛果 |
 | `hltv_get_rankings` | 查询 HLTV 战队排名 |
-| `hltv_get_team_info` | 查询战队资料、成员与排名 |
+| `hltv_get_team_info` | 查询战队资料、成员与排名（支持榜外战队，自动站内搜索） |
 | `hltv_get_live_matches` | 查询进行中的比赛 |
 | `hltv_get_live_score` | 查询指定比赛的实时比分 |
 
@@ -71,7 +71,7 @@ python3 -m json.tool _manifest.json >/dev/null
 python3 -m compileall -q plugin.py hltv_scraper.py live_providers.py
 ```
 
-发布前还应在实际 MaiBot venv 里加载插件，并用一条非敏感查询验证 Jina → Tavily 的回退链。不要用“HTTP 200”代替工具结果验收。
+发布前还应在实际 MaiBot venv 里加载插件，并用非敏感查询验证抓取链：比赛列表（Jina → Tavily 回退）与榜外战队（站内搜索兜底）。不要用“HTTP 200”代替工具结果验收。
 
 ## 维护约定
 

@@ -12,7 +12,7 @@ from .hltv_scraper import HAS_DEPENDENCIES, LiveMatch, scraper
 from .live_providers import LiveMatchData, create_live_provider
 
 
-PLUGIN_VERSION = "6.1.1"
+PLUGIN_VERSION = "6.2.0"
 CONFIG_SCHEMA_VERSION = "6.1.0"
 
 
@@ -497,9 +497,14 @@ class CS2HLTVPlugin(MaiBotPlugin):
                 return {"success": False, "content": f"未找到战队: {team_name}"}
 
             content = f"{team.name} 战队信息\n\n"
-            content += f"世界排名: #{team.rank}\n"
-            content += f"积分: {team.points}\n"
-            content += f"排名变化: {team.change}\n"
+            if team.rank > 0:
+                content += f"世界排名: #{team.rank}\n"
+            else:
+                content += "世界排名: 未上榜\n"
+            if team.points > 0:
+                content += f"积分: {team.points}\n"
+            if team.change:
+                content += f"排名变化: {team.change}\n"
 
             if team.players:
                 content += f"\n选手阵容:\n"

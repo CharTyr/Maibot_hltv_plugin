@@ -1,6 +1,7 @@
 """抓取通道回归：主通道的瞬态坏页不能立刻把比赛列表打成空。"""
 
 import unittest
+from unittest.mock import AsyncMock, patch
 
 from hltv_scraper import HLTVScraper
 
@@ -18,7 +19,7 @@ class JinaRetryTests(unittest.IsolatedAsyncioTestCase):
         scraper = HLTVScraper()
         calls = {"jina": 0, "tavily": 0}
 
-        async def transient_jina(_url: str):
+        async def transient_jina(_url: str, no_cache: bool = False):
             calls["jina"] += 1
             return None if calls["jina"] < 3 else MATCHES_HTML
 
@@ -30,7 +31,8 @@ class JinaRetryTests(unittest.IsolatedAsyncioTestCase):
         scraper._fetch_via_tavily = unexpected_tavily
         scraper._tavily_api_key = "test-only"
 
-        matches = await scraper.get_matches()
+        with patch("hltv_scraper.asyncio.sleep", new_callable=AsyncMock):
+            matches = await scraper.get_matches()
 
         self.assertEqual(calls, {"jina": 3, "tavily": 0})
         self.assertEqual(len(matches), 1)
