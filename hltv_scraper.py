@@ -236,14 +236,18 @@ class HLTVScraper:
             logger.error(f"Tavily 请求错误: {e}")
         return None
 
-    async def _fetch(self, url: str, retries: int = 2) -> Optional[str]:
+    async def _fetch(self, url: str, retries: int = 3) -> Optional[str]:
         """获取页面 HTML：Jina Reader 优先，Tavily 兜底"""
         if not HAS_DEPENDENCIES:
             return None
 
-        html = await self._fetch_via_jina(url)
-        if html:
-            return html
+        jina_attempts = max(1, retries)
+        for attempt in range(jina_attempts):
+            html = await self._fetch_via_jina(url)
+            if html:
+                return html
+            if attempt < jina_attempts - 1:
+                await asyncio.sleep(5)
 
         if self._tavily_api_key:
             logger.info(f"Jina 失败，回退 Tavily: {url}")
