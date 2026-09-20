@@ -127,6 +127,10 @@ class TeamInfo:
     recent_results: List[str] = field(default_factory=list)
 
 
+class TeamSearchError(RuntimeError):
+    """战队搜索链路失败，而不是没有匹配到战队。"""
+
+
 @dataclass
 class PlayerInfo:
     """选手详细信息"""
@@ -1069,7 +1073,7 @@ class HLTVScraper:
 
         search_html = await self._fetch(f"{self.BASE_URL}/search?query={quote(name)}")
         if not search_html:
-            return None
+            raise TeamSearchError(f"获取战队搜索页失败: {name}")
 
         candidates = self._parse_search_candidates(search_html)
         pick = self._pick_team_candidate(candidates, name)
@@ -1079,8 +1083,7 @@ class HLTVScraper:
         team_id, candidate_name, href = pick
         team_html = await self._fetch(f"{self.BASE_URL}{href}")
         if not team_html:
-            # 队主页失败只允许本次查询降级，不能把空资料缓存成事实。
-            return TeamInfo(team_id=team_id, name=candidate_name)
+            raise TeamSearchError(f"获取战队主页失败: {candidate_name}")
 
         team = self._parse_team_page(team_html, team_id, candidate_name)
         self._set_cache(cache_key, team)

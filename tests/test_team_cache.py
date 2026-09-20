@@ -2,7 +2,7 @@
 
 import unittest
 
-from hltv_scraper import HLTVScraper
+from hltv_scraper import HLTVScraper, TeamSearchError
 
 
 SEARCH_HTML = """
@@ -39,12 +39,10 @@ class TeamCacheTests(unittest.IsolatedAsyncioTestCase):
         scraper.get_rankings = no_rankings
         scraper._fetch = fetch
 
-        first = await scraper.search_team("The Huns")
+        with self.assertRaises(TeamSearchError):
+            await scraper.search_team("The Huns")
         second = await scraper.search_team("The Huns")
 
-        self.assertIsNotNone(first)
-        assert first is not None
-        self.assertEqual(first.rank, 0)
         self.assertIsNotNone(second)
         assert second is not None
         self.assertEqual(second.rank, 150)

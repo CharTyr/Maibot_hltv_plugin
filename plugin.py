@@ -8,7 +8,7 @@ from typing import List
 from maibot_sdk import Field, MaiBotPlugin, PluginConfigBase, Tool
 from maibot_sdk.types import ToolParameterInfo, ToolParamType
 
-from .hltv_scraper import HAS_DEPENDENCIES, LiveMatch, scraper
+from .hltv_scraper import HAS_DEPENDENCIES, LiveMatch, TeamSearchError, scraper
 from .live_providers import LiveMatchData, create_live_provider
 
 
@@ -526,6 +526,9 @@ class CS2HLTVPlugin(MaiBotPlugin):
                     content += f"  {result_icon} vs {opponent} ({r['score1']}-{r['score2']})\n"
 
             return {"success": True, "content": content.strip()}
+        except TeamSearchError as e:
+            self.ctx.logger.warning(f"战队查询通道失败: {e}")
+            return {"success": False, "content": f"战队查询失败，请稍后重试: {e}"}
         except Exception as e:
             self.ctx.logger.error(f"获取战队信息失败: {e}")
             return {"success": False, "content": f"获取战队信息失败: {e}"}
