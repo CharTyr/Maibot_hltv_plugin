@@ -1,6 +1,6 @@
 """
 实时数据提供者模块
-支持 Playwright、BO3.gg (cs2api)、PandaScore 三种数据源
+支持 BO3.gg (cs2api)、PandaScore 两种数据源
 """
 
 from __future__ import annotations

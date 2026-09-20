@@ -1,161 +1,85 @@
-# CS2/CSGO HLTV Plugin for MaiBot
+# MaiBot HLTV 插件
 
-> 🎮 **CS2/CSGO电竞数据工具插件** - 开箱即用，支持可选实时数据源
+> 面向 MaiBot 的 CS2 / CS:GO 赛事资料工具。只在 Planner 明确调用时查询，不主动向群聊推送消息。
 
-## v5.1.0 特性
+**当前发布：v6.1.1**
 
-- ✅ **开箱即用** - 无需额外服务，插件直接集成爬虫
-- ✅ **绕过 Cloudflare** - 使用 `curl_cffi` 模拟真实浏览器
-- ✅ **丰富数据** - 比赛、排名、Scoreboard、选手统计
-- ✅ **智能缓存** - 自动缓存数据，减少请求
-- ✅ **可选实时数据** - 支持 Playwright、BO3.gg、PandaScore 三种实时数据源
+它提供比赛列表、赛程详情、地图数据、赛果、世界排名、战队资料和实时比分查询。主数据来自 HLTV 页面；抓取链路优先使用 **Jina Reader** 读取页面 HTML，遇到不可用时回退 **Tavily Extract**。
 
 ## 安装
 
-### 1. 安装基础依赖
+在 MaiBot 仓库根目录执行：
 
 ```bash
-pip install curl_cffi beautifulsoup4 lxml
+git clone https://github.com/CharTyr/Maibot_hltv_plugin.git plugins/hltv_plugin
+.venv/bin/pip install -r plugins/hltv_plugin/requirements.txt
+if [ ! -e plugins/hltv_plugin/config.toml ]; then
+  cp plugins/hltv_plugin/config.toml.example plugins/hltv_plugin/config.toml
+fi
 ```
 
-### 2. 安装可选实时数据依赖（按需）
+这段只会在首次安装时生成配置。升级已有部署时，**不要复制模板覆盖** `config.toml`；保留现有凭据和用户设置，只按发布说明手工补新增字段。
+
+按需要编辑 `plugins/hltv_plugin/config.toml`，再重启 MaiBot，或等待运行环境的插件热重载完成。
+
+`config.toml` 含可能的 Tavily / PandaScore 凭据，已被 Git 忽略，**不要提交**。
+
+## 配置
+
+`config.toml.example` 是唯一维护的模板。
+
+- `[plugin]`：启用状态和配置 schema 版本。
+- `[cache]`：比赛、赛果、排名等页面缓存时间。
+- `[display]`：各类查询的默认展示数量。
+- `[jina]`：Jina Reader 主抓取通道；默认开启，不需要 key。
+- `[tavily]`：Jina 不可用时的 Extract 备选通道；可填写 API key，`base_url` 可改为兼容中转。
+- `[live_data]`：可选实时比分源；默认关闭。
+
+启用 `[live_data]` 时按 provider 额外安装：`bo3gg` 需要 `cs2api`，`pandascore` 需要 `aiohttp` 和有效的 PandaScore token。
+
+配置里的 `config_version = "6.1.0"` 是**配置 schema 版本**，不是插件发布版本。除非模板字段发生迁移，不要为了跟发布号好看而改它。
+
+## Planner 工具
+
+| 工具 | 用途 |
+| --- | --- |
+| `hltv_get_matches` | 查询正在进行、即将开始的比赛 |
+| `hltv_get_match_detail` | 查询比赛详情、比分、地图和 veto |
+| `hltv_get_map_stats` | 查询单张地图的选手统计 |
+| `hltv_get_results` | 查询近期赛果 |
+| `hltv_get_rankings` | 查询 HLTV 战队排名 |
+| `hltv_get_team_info` | 查询战队资料、成员与排名 |
+| `hltv_get_live_matches` | 查询进行中的比赛 |
+| `hltv_get_live_score` | 查询指定比赛的实时比分 |
+
+## 数据与缓存
+
+- **HLTV**：比赛、赛果、排名、战队和选手资料的原始来源。
+- **Jina Reader**：默认 HTML 抓取通道，用于绕开 HLTV 的 Cloudflare 页面。
+- **Tavily Extract**：Jina Reader 不可用时的备选 HTML 抓取通道。
+- **实时源**：可选 BO3.gg 或 PandaScore；没有数据时可回退 HLTV 静态页面。
+
+缓存时间见 `config.toml.example`。比赛列表和详情默认较短，排名与结果默认较长；不要把实时比分轮询间隔调得过低。
+
+## 开发与验证
+
+项目只依赖运行时的 MaiBot SDK；项目契约测试不需要联网：
 
 ```bash
-# BO3.gg (推荐，免费)
-pip install cs2api
-
-# PandaScore (需要 API token)
-pip install aiohttp
-
-# Playwright (需要安装浏览器)
-pip install playwright
-playwright install chromium
+python3 -m unittest discover -s tests
+python3 -m json.tool _manifest.json >/dev/null
+python3 -m compileall -q plugin.py hltv_scraper.py live_providers.py
 ```
 
-### 3. 复制插件
+发布前还应在实际 MaiBot venv 里加载插件，并用一条非敏感查询验证 Jina → Tavily 的回退链。不要用“HTTP 200”代替工具结果验收。
 
-将 `Maibot_hltv_plugin` 文件夹复制到 MaiBot 的 `plugins/` 目录。
+## 维护约定
 
-### 4. 配置（可选）
+- 发布号只维护在 `PLUGIN_VERSION`、`_manifest.json`、README、CHANGELOG 与 HANDOVER。
+- `config_version` 仅表示配置 schema，保持与 `config.toml.example` 一致。
+- `*.bak` / `*.bak.*` 只允许放在仓库外的运维备份目录，不能留在工作树。
+- 每个发布必须有 Git tag 和 GitHub Release。
 
-复制 `config_template.toml` 为 `config.toml`，按需修改配置。
+## License
 
-### 5. 重启 MaiBot
-
-插件会自动加载。
-
-## 实时数据配置
-
-默认情况下，插件使用 HLTV 静态数据（页面加载时的数据）。如需更准确的实时数据，可以启用以下数据源：
-
-### 方案对比
-
-| 数据源 | 优点 | 缺点 | 推荐场景 |
-|--------|------|------|----------|
-| **HLTV 静态** | 覆盖所有比赛，无需配置 | 数据可能延迟 | 默认使用 |
-| **BO3.gg** | 免费，有选手实时数据 | 覆盖范围有限 | 主流赛事 |
-| **PandaScore** | 专业 API，数据准确 | 需要 token，免费版无回合比分 | 商业应用 |
-| **Playwright** | 获取真实实时数据 | 资源消耗大，需要浏览器 | 高精度需求 |
-
-### 配置示例
-
-```toml
-[live_data]
-enabled = true
-provider = "bo3gg"  # 或 "pandascore", "playwright"
-fallback_to_hltv = true
-
-[live_data.pandascore]
-api_token = "your_token_here"
-```
-
-## 工具列表
-
-| 工具 | 说明 |
-|------|------|
-| `GetMatchesTool` | 获取比赛列表（即将开始/进行中） |
-| `GetMatchDetailTool` | 获取比赛详情（比分、地图、Veto） |
-| `GetMapStatsTool` | 获取地图 Scoreboard（K/D/A、ADR、Rating） |
-| `GetMatchResultsTool` | 获取最近比赛结果 |
-| `GetTeamRankingsTool` | 获取战队世界排名 |
-| `GetTeamInfoTool` | 获取战队详细信息 |
-| `GetLiveMatchTool` | 获取正在进行的比赛（支持实时数据） |
-| `GetLiveScoreTool` | 获取指定比赛实时比分 |
-
-## 示例输出
-
-### 实时比分
-```
-🔴 实时比分 [bo3gg]
-
-🎮 Galaxy vs WeWillWin
-━━━━━━━━━━━━━━━━━━━━
-📊 地图: 0 - 0 (BO3)
-🗺️ 当前: Dust2
-🎯 回合: 10 - 6
-⚖️ 比分持平
-━━━━━━━━━━━━━━━━━━━━
-🏆 kleverr A Lyga Season 2 Finals
-```
-
-### Scoreboard
-```
-📊 Ancient Scoreboard
-🏆 FaZe 5 - 13 Natus Vincere
-📅 StarLadder Budapest Major 2025
-
-【FaZe】
-选手         K   A   D   ADR  KAST Rating
----------------------------------------------
-jcobbb      10   4  11  72.6   61%   0.83
-karrigan     8   6  14  60.3   67%   0.80
-broky       10   5  13  58.2   72%   0.73
-```
-
-## 数据来源
-
-- **HLTV.org** - 主要数据源，覆盖所有比赛
-- **BO3.gg** - 可选实时数据源
-- **PandaScore** - 可选实时数据源
-
-## 缓存策略
-
-| 数据类型 | 缓存时间 |
-|----------|----------|
-| 比赛列表 | 2 分钟 |
-| 比赛详情 | 1 分钟 |
-| 比赛结果 | 10 分钟 |
-| 战队排名 | 1 小时 |
-| 选手信息 | 1 小时 |
-
-## 文件结构
-
-```
-Maibot_hltv_plugin/
-├── plugin.py           # 插件主文件（工具定义）
-├── hltv_scraper.py     # HLTV 爬虫模块
-├── live_providers.py   # 实时数据提供者
-├── _manifest.json      # 插件清单
-├── config_template.toml
-├── config.toml         # 用户配置（需自行创建）
-└── README.md
-```
-
-## 故障排除
-
-### 依赖未安装
-```
-❌ HLTV 爬虫依赖未安装。请运行: pip install curl_cffi beautifulsoup4 lxml
-```
-
-### 实时数据不可用
-- BO3.gg 可能不覆盖小型赛事
-- PandaScore 需要有效的 API token
-- 启用 `fallback_to_hltv = true` 可回退到 HLTV 数据
-
-### 请求被拦截
-插件会自动重试最多 3 次。如果仍然失败，可能是临时限流，稍后再试。
-
-## 许可证
-
-GPL-v3.0-or-later
+GPL-3.0-or-later。

@@ -1,5 +1,5 @@
 """
-CS2 HLTV 电竞信息插件 v6.1.0 - 新版 maibot-plugin-sdk 适配
+CS2 HLTV 电竞信息插件 v6.1.1 - 新版 maibot-plugin-sdk 适配
 直接集成爬虫，无需额外服务
 """
 
@@ -10,6 +10,10 @@ from maibot_sdk.types import ToolParameterInfo, ToolParamType
 
 from .hltv_scraper import HAS_DEPENDENCIES, LiveMatch, scraper
 from .live_providers import LiveMatchData, create_live_provider
+
+
+PLUGIN_VERSION = "6.1.1"
+CONFIG_SCHEMA_VERSION = "6.1.0"
 
 
 # ============== 配置模型 ==============
@@ -23,7 +27,7 @@ class PluginSectionConfig(PluginConfigBase):
     __ui_order__ = 0
 
     enabled: bool = Field(default=True, description="是否启用插件")
-    config_version: str = Field(default="6.1.0", description="配置版本")
+    config_version: str = Field(default=CONFIG_SCHEMA_VERSION, description="配置 schema 版本")
 
 
 class CacheConfig(PluginConfigBase):
@@ -181,7 +185,7 @@ class CS2HLTVPlugin(MaiBotPlugin):
     async def on_load(self) -> None:
         """插件加载"""
         if HAS_DEPENDENCIES:
-            self.ctx.logger.info("CS2 HLTV 插件 v6.1.0 已加载，爬虫依赖正常")
+            self.ctx.logger.info(f"CS2 HLTV 插件 v{PLUGIN_VERSION} 已加载，爬虫依赖正常")
         else:
             self.ctx.logger.warning("CS2 HLTV 插件已加载，但爬虫依赖未安装。请运行: pip install beautifulsoup4 lxml requests")
 
