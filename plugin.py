@@ -5,6 +5,8 @@ CS2 HLTV 电竞信息插件 v6.1.1 - 新版 maibot-plugin-sdk 适配
 
 from typing import List
 
+import asyncio
+
 from maibot_sdk import Field, MaiBotPlugin, PluginConfigBase, Tool
 from maibot_sdk.types import ToolParameterInfo, ToolParamType
 
@@ -14,6 +16,7 @@ from .live_providers import LiveMatchData, create_live_provider
 
 PLUGIN_VERSION = "6.2.0"
 CONFIG_SCHEMA_VERSION = "6.1.0"
+TEAM_INFO_STEP_TIMEOUT_SECONDS = 30.0
 
 
 # ============== 配置模型 ==============
@@ -492,7 +495,10 @@ class CS2HLTVPlugin(MaiBotPlugin):
             return {"success": False, "content": "HLTV 爬虫依赖未安装"}
 
         try:
-            team = await scraper.search_team(team_name)
+            team = await asyncio.wait_for(
+                scraper.search_team(team_name),
+                timeout=TEAM_INFO_STEP_TIMEOUT_SECONDS,
+            )
             if not team:
                 return {"success": False, "content": f"未找到战队: {team_name}"}
 
@@ -512,7 +518,10 @@ class CS2HLTVPlugin(MaiBotPlugin):
                     content += f"  - {p}\n"
 
             # 获取近期比赛
-            results = await scraper.get_results(max_results=20)
+            results = await asyncio.wait_for(
+                scraper.get_results(max_results=20),
+                timeout=TEAM_INFO_STEP_TIMEOUT_SECONDS,
+            )
             team_results = [
                 r for r in results
                 if team_name.lower() in r["team1"].lower() or team_name.lower() in r["team2"].lower()
@@ -526,6 +535,9 @@ class CS2HLTVPlugin(MaiBotPlugin):
                     content += f"  {result_icon} vs {opponent} ({r['score1']}-{r['score2']})\n"
 
             return {"success": True, "content": content.strip()}
+        except asyncio.TimeoutError:
+            self.ctx.logger.warning(f"战队信息查询超时: {team_name}")
+            return {"success": False, "content": "战队信息查询超时，请稍后重试"}
         except TeamSearchError as e:
             self.ctx.logger.warning(f"战队查询通道失败: {e}")
             return {"success": False, "content": f"战队查询失败，请稍后重试: {e}"}

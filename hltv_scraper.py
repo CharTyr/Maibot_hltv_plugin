@@ -170,6 +170,9 @@ class HLTVScraper:
         self._tavily_api_key: str = ""
         self._tavily_base_url: str = "https://api.tavily.com"
         self._jina_base_url: str = "https://r.jina.ai"
+        # 单个 URL 的总预算，避免 Jina/Tavily 重试时间无限叠加。
+        self._fetch_deadline_seconds = 20.0
+        self._request_timeout_seconds = 10.0
 
     def set_tavily_key(self, key: str):
         """设置 Tavily API Key"""
@@ -212,7 +215,7 @@ class HLTVScraper:
             resp = std_requests.get(
                 f"{self._jina_base_url}/{url}",
                 headers=headers,
-                timeout=45,
+                timeout=self._request_timeout_seconds,
             )
             resp.raise_for_status()
             return resp.text
@@ -244,7 +247,7 @@ class HLTVScraper:
                         "urls": [url],
                         "format": "html_tags",
                     },
-                    timeout=45,
+                    timeout=self._request_timeout_seconds,
                 ),
             )
             if response.status_code == 200:
@@ -264,26 +267,55 @@ class HLTVScraper:
         return None
 
     async def _fetch(self, url: str, retries: int = 3) -> Optional[str]:
-        """获取页面 HTML：Jina Reader 优先（重试绕过其缓存），Tavily 兜底"""
+        """获取页面 HTML，并把所有通道和重试限制在单 URL deadline 内。"""
         if not HAS_DEPENDENCIES:
             return None
 
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self._fetch_deadline_seconds
         jina_attempts = max(1, retries)
+
         for attempt in range(jina_attempts):
-            html = await self._fetch_via_jina(url, no_cache=(attempt > 0))
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                break
+            try:
+                html = await asyncio.wait_for(
+                    self._fetch_via_jina(url, no_cache=(attempt > 0)),
+                    timeout=remaining,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"Jina 抓取达到 deadline: {url}")
+                break
             if html:
                 return html
             if attempt < jina_attempts - 1:
-                await asyncio.sleep(5)
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    break
+                await asyncio.sleep(min(5, remaining))
 
         if self._tavily_api_key:
             logger.info(f"Jina 失败，回退 Tavily: {url}")
-            for attempt in range(retries):
-                html = await self._fetch_via_tavily(url)
+            for attempt in range(max(0, retries)):
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    break
+                try:
+                    html = await asyncio.wait_for(
+                        self._fetch_via_tavily(url),
+                        timeout=remaining,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(f"Tavily 抓取达到 deadline: {url}")
+                    break
                 if html:
                     return html
                 if attempt < retries - 1:
-                    await asyncio.sleep(1)
+                    remaining = deadline - loop.time()
+                    if remaining <= 0:
+                        break
+                    await asyncio.sleep(min(1, remaining))
 
         logger.warning(f"所有抓取通道均失败: {url}")
         return None
