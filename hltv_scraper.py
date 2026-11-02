@@ -11,6 +11,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from collections import OrderedDict
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
@@ -158,7 +159,9 @@ class HLTVScraper:
     BASE_URL = "https://www.hltv.org"
 
     def __init__(self):
-        self._cache: Dict[str, Tuple[Any, datetime]] = {}
+        # OrderedDict 实现 LRU：get 时 move_to_end，容量满 evict 最旧项
+        self._cache: OrderedDict[str, Tuple[Any, datetime]] = OrderedDict()
+        self._cache_max_entries = 200
         self._cache_ttl = {
             "matches": 120,
             "rankings": 3600,
@@ -189,17 +192,21 @@ class HLTVScraper:
             self._jina_base_url = url.rstrip("/")
 
     def _get_cache(self, key: str, cache_type: str = "matches") -> Optional[Any]:
-        """获取缓存"""
+        """获取缓存（LRU：命中后移到最后）"""
         if key in self._cache:
             data, timestamp = self._cache[key]
             ttl = self._cache_ttl.get(cache_type, 300)
             if datetime.now() - timestamp < timedelta(seconds=ttl):
+                self._cache.move_to_end(key)
                 return data
         return None
 
     def _set_cache(self, key: str, value: Any):
-        """设置缓存"""
+        """设置缓存（LRU evict：满 200 条淘汰最旧）"""
         self._cache[key] = (value, datetime.now())
+        self._cache.move_to_end(key)
+        while len(self._cache) > self._cache_max_entries:
+            self._cache.popitem(last=False)
 
     async def _fetch_via_jina(self, url: str, no_cache: bool = False) -> Optional[str]:
         """通过 Jina Reader 获取页面原始 HTML（主通道，免 key 过 Cloudflare）

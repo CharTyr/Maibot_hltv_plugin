@@ -3,9 +3,9 @@ CS2 HLTV 电竞信息插件 v6.1.1 - 新版 maibot-plugin-sdk 适配
 直接集成爬虫，无需额外服务
 """
 
-from typing import List
-
 import asyncio
+import functools
+from typing import List
 
 from maibot_sdk import Field, MaiBotPlugin, PluginConfigBase, Tool
 from maibot_sdk.types import ToolParameterInfo, ToolParamType
@@ -17,6 +17,31 @@ from .live_providers import LiveMatchData, create_live_provider
 PLUGIN_VERSION = "6.2.0"
 CONFIG_SCHEMA_VERSION = "6.1.0"
 TEAM_INFO_STEP_TIMEOUT_SECONDS = 30.0
+
+
+def _tool_guard(default_msg: str):
+    """Tool 样板抽取：依赖检查 + 统一错误捕获，业务代码只写过滤+格式化。"""
+
+    def decorator(fn):
+        @functools.wraps(fn)
+        async def wrapper(self, **kwargs):
+            if not HAS_DEPENDENCIES:
+                return {"success": False, "content": "HLTV 爬虫依赖未安装。请运行: pip install beautifulsoup4 lxml requests"}
+            try:
+                return await fn(self, **kwargs)
+            except asyncio.TimeoutError:
+                self.ctx.logger.warning(f"{default_msg}: 查询超时")
+                return {"success": False, "content": f"{default_msg}：查询超时，请稍后重试"}
+            except TeamSearchError as e:
+                self.ctx.logger.warning(f"{default_msg}: 战队查询通道失败 {e}")
+                return {"success": False, "content": f"{default_msg}：{e}"}
+            except Exception as e:  # noqa: BLE001
+                self.ctx.logger.error(f"{default_msg}: {e}")
+                return {"success": False, "content": f"{default_msg}: {e}"}
+
+        return wrapper
+
+    return decorator
 
 
 # ============== 配置模型 ==============
@@ -251,40 +276,34 @@ class CS2HLTVPlugin(MaiBotPlugin):
             ToolParameterInfo(name="max_matches", param_type=ToolParamType.INTEGER, description="返回的最大比赛数量，默认10", required=False, default=10),
         ],
     )
+    @_tool_guard("获取比赛列表失败")
     async def get_matches(self, team_filter: str = "", max_matches: int = 10, **kwargs):
         """获取比赛列表"""
-        if not HAS_DEPENDENCIES:
-            return {"success": False, "content": "HLTV 爬虫依赖未安装。请运行: pip install beautifulsoup4 lxml requests"}
+        matches = await scraper.get_matches()
 
-        try:
-            matches = await scraper.get_matches()
+        if team_filter:
+            matches = [
+                m for m in matches
+                if team_filter.lower() in m["team1"].lower()
+                or team_filter.lower() in m["team2"].lower()
+            ]
 
-            if team_filter:
-                matches = [
-                    m for m in matches
-                    if team_filter.lower() in m["team1"].lower()
-                    or team_filter.lower() in m["team2"].lower()
-                ]
+        if not matches:
+            return {"success": True, "content": "当前没有找到比赛信息"}
 
-            if not matches:
-                return {"success": True, "content": "当前没有找到比赛信息"}
+        matches = matches[:max_matches]
 
-            matches = matches[:max_matches]
+        content = f"CS2 比赛列表 ({len(matches)} 场):\n\n"
+        for i, m in enumerate(matches, 1):
+            status_icon = "[直播]" if m["status"] == "live" else "[预定]"
+            content += f"{i}. {status_icon} {m['team1']} vs {m['team2']}\n"
+            if m["time"]:
+                content += f"   时间: {m['time']}\n"
+            if m["event"]:
+                content += f"   赛事: {m['event'][:50]}\n"
+            content += "\n"
 
-            content = f"CS2 比赛列表 ({len(matches)} 场):\n\n"
-            for i, m in enumerate(matches, 1):
-                status_icon = "[直播]" if m["status"] == "live" else "[预定]"
-                content += f"{i}. {status_icon} {m['team1']} vs {m['team2']}\n"
-                if m["time"]:
-                    content += f"   时间: {m['time']}\n"
-                if m["event"]:
-                    content += f"   赛事: {m['event'][:50]}\n"
-                content += "\n"
-
-            return {"success": True, "content": content.strip()}
-        except Exception as e:
-            self.ctx.logger.error(f"获取比赛列表失败: {e}")
-            return {"success": False, "content": f"获取比赛列表失败: {e}"}
+        return {"success": True, "content": content.strip()}
 
     @Tool(
         "hltv_get_match_detail",
@@ -294,53 +313,47 @@ class CS2HLTVPlugin(MaiBotPlugin):
             ToolParameterInfo(name="team_name", param_type=ToolParamType.STRING, description="战队名称（用于查找比赛，可选）", required=False),
         ],
     )
+    @_tool_guard("获取比赛详情失败")
     async def get_match_detail(self, match_id: str = "", team_name: str = "", **kwargs):
         """获取比赛详情"""
-        if not HAS_DEPENDENCIES:
-            return {"success": False, "content": "HLTV 爬虫依赖未安装"}
+        if not match_id and team_name:
+            matches = await scraper.get_matches()
+            for m in matches:
+                if team_name.lower() in m["team1"].lower() or team_name.lower() in m["team2"].lower():
+                    match_id = m["match_id"]
+                    break
 
-        try:
-            if not match_id and team_name:
-                matches = await scraper.get_matches()
-                for m in matches:
-                    if team_name.lower() in m["team1"].lower() or team_name.lower() in m["team2"].lower():
-                        match_id = m["match_id"]
-                        break
+        if not match_id:
+            return {"success": False, "content": "请提供比赛ID或战队名称"}
 
-            if not match_id:
-                return {"success": False, "content": "请提供比赛ID或战队名称"}
+        detail = await scraper.get_match_detail(match_id)
+        if not detail:
+            return {"success": False, "content": f"未找到比赛 {match_id} 的详情"}
 
-            detail = await scraper.get_match_detail(match_id)
-            if not detail:
-                return {"success": False, "content": f"未找到比赛 {match_id} 的详情"}
+        status_map = {"live": "[进行中]", "scheduled": "[即将开始]", "finished": "[已结束]"}
+        status = status_map.get(detail.status, detail.status)
 
-            status_map = {"live": "[进行中]", "scheduled": "[即将开始]", "finished": "[已结束]"}
-            status = status_map.get(detail.status, detail.status)
+        content = f"比赛详情\n\n"
+        content += f"{detail.team1} {detail.team1_score} - {detail.team2_score} {detail.team2}\n"
+        content += f"状态: {status}\n"
+        if detail.event:
+            content += f"赛事: {detail.event}\n"
+        if detail.format:
+            content += f"赛制: {detail.format.upper()}\n"
+        if detail.date:
+            content += f"日期: {detail.date}\n"
 
-            content = f"比赛详情\n\n"
-            content += f"{detail.team1} {detail.team1_score} - {detail.team2_score} {detail.team2}\n"
-            content += f"状态: {status}\n"
-            if detail.event:
-                content += f"赛事: {detail.event}\n"
-            if detail.format:
-                content += f"赛制: {detail.format.upper()}\n"
-            if detail.date:
-                content += f"日期: {detail.date}\n"
+        if detail.maps:
+            content += f"\n地图 ({len(detail.maps)} 张):\n"
+            for i, map_result in enumerate(detail.maps, 1):
+                content += f"  Map {i}: {map_result.map_name} - {map_result.team1_score}:{map_result.team2_score}\n"
 
-            if detail.maps:
-                content += f"\n地图 ({len(detail.maps)} 张):\n"
-                for i, map_result in enumerate(detail.maps, 1):
-                    content += f"  Map {i}: {map_result.map_name} - {map_result.team1_score}:{map_result.team2_score}\n"
+        if detail.veto:
+            content += f"\nVeto:\n"
+            for v in detail.veto[:6]:
+                content += f"  - {v}\n"
 
-            if detail.veto:
-                content += f"\nVeto:\n"
-                for v in detail.veto[:6]:
-                    content += f"  - {v}\n"
-
-            return {"success": True, "content": content.strip()}
-        except Exception as e:
-            self.ctx.logger.error(f"获取比赛详情失败: {e}")
-            return {"success": False, "content": f"获取比赛详情失败: {e}"}
+        return {"success": True, "content": content.strip()}
 
     @Tool(
         "hltv_get_map_stats",
@@ -351,61 +364,55 @@ class CS2HLTVPlugin(MaiBotPlugin):
             ToolParameterInfo(name="map_index", param_type=ToolParamType.INTEGER, description="地图序号（从1开始，默认1）", required=False, default=1),
         ],
     )
+    @_tool_guard("获取地图统计失败")
     async def get_map_stats(self, match_id: str = "", team_name: str = "", map_index: int = 1, **kwargs):
         """获取地图统计"""
-        if not HAS_DEPENDENCIES:
-            return {"success": False, "content": "HLTV 爬虫依赖未安装"}
+        if not match_id and team_name:
+            results = await scraper.get_results(max_results=20)
+            for r in results:
+                if team_name.lower() in r["team1"].lower() or team_name.lower() in r["team2"].lower():
+                    match_id = r["match_id"]
+                    break
 
-        try:
-            if not match_id and team_name:
-                results = await scraper.get_results(max_results=20)
-                for r in results:
-                    if team_name.lower() in r["team1"].lower() or team_name.lower() in r["team2"].lower():
-                        match_id = r["match_id"]
-                        break
+        if not match_id:
+            return {"success": False, "content": "请提供比赛ID或战队名称"}
 
-            if not match_id:
-                return {"success": False, "content": "请提供比赛ID或战队名称"}
+        detail = await scraper.get_match_detail(match_id)
+        if not detail or not detail.maps:
+            return {"success": False, "content": "未找到地图数据"}
 
-            detail = await scraper.get_match_detail(match_id)
-            if not detail or not detail.maps:
-                return {"success": False, "content": "未找到地图数据"}
+        if map_index < 1 or map_index > len(detail.maps):
+            return {"success": False, "content": f"地图序号无效，该比赛共 {len(detail.maps)} 张地图"}
 
-            if map_index < 1 or map_index > len(detail.maps):
-                return {"success": False, "content": f"地图序号无效，该比赛共 {len(detail.maps)} 张地图"}
+        map_result = detail.maps[map_index - 1]
 
-            map_result = detail.maps[map_index - 1]
+        # 优先尝试 stats 页面，失败则从详情页内嵌数据解析
+        stats = None
+        if map_result.stats_url:
+            stats = await scraper.get_map_stats(map_result.stats_url)
+        if not stats:
+            stats = await scraper.get_map_stats_from_match(match_id, map_index - 1)
+        if not stats:
+            return {"success": False, "content": "该地图暂无详细统计数据"}
 
-            # 优先尝试 stats 页面，失败则从详情页内嵌数据解析
-            stats = None
-            if map_result.stats_url:
-                stats = await scraper.get_map_stats(map_result.stats_url)
-            if not stats:
-                stats = await scraper.get_map_stats_from_match(match_id, map_index - 1)
-            if not stats:
-                return {"success": False, "content": "该地图暂无详细统计数据"}
+        content = f"{map_result.map_name} Scoreboard\n"
+        content += f"{detail.team1} {map_result.team1_score} - {map_result.team2_score} {detail.team2}\n"
+        content += f"{detail.event}\n\n"
 
-            content = f"{map_result.map_name} Scoreboard\n"
-            content += f"{detail.team1} {map_result.team1_score} - {map_result.team2_score} {detail.team2}\n"
-            content += f"{detail.event}\n\n"
+        for team_key in ["team1", "team2"]:
+            team_data = stats.get(team_key, {})
+            team_name_display = team_data.get("name", team_key)
+            players = team_data.get("players", [])
 
-            for team_key in ["team1", "team2"]:
-                team_data = stats.get(team_key, {})
-                team_name_display = team_data.get("name", team_key)
-                players = team_data.get("players", [])
+            content += f"[{team_name_display}]\n"
+            content += f"{'选手':<10} {'K':>3} {'A':>3} {'D':>3} {'ADR':>5} {'KAST':>5} {'Rating':>6}\n"
+            content += "-" * 45 + "\n"
 
-                content += f"[{team_name_display}]\n"
-                content += f"{'选手':<10} {'K':>3} {'A':>3} {'D':>3} {'ADR':>5} {'KAST':>5} {'Rating':>6}\n"
-                content += "-" * 45 + "\n"
+            for p in players:
+                content += f"{p.nickname:<10} {p.kills:>3} {p.assists:>3} {p.deaths:>3} {p.adr:>5.1f} {p.kast:>4.0f}% {p.rating:>6.2f}\n"
+            content += "\n"
 
-                for p in players:
-                    content += f"{p.nickname:<10} {p.kills:>3} {p.assists:>3} {p.deaths:>3} {p.adr:>5.1f} {p.kast:>4.0f}% {p.rating:>6.2f}\n"
-                content += "\n"
-
-            return {"success": True, "content": content.strip()}
-        except Exception as e:
-            self.ctx.logger.error(f"获取地图统计失败: {e}")
-            return {"success": False, "content": f"获取地图统计失败: {e}"}
+        return {"success": True, "content": content.strip()}
 
     @Tool(
         "hltv_get_results",
@@ -415,40 +422,34 @@ class CS2HLTVPlugin(MaiBotPlugin):
             ToolParameterInfo(name="max_results", param_type=ToolParamType.INTEGER, description="返回的最大结果数量，默认10", required=False, default=10),
         ],
     )
+    @_tool_guard("获取比赛结果失败")
     async def get_results(self, team_filter: str = "", max_results: int = 10, **kwargs):
         """获取比赛结果"""
-        if not HAS_DEPENDENCIES:
-            return {"success": False, "content": "HLTV 爬虫依赖未安装"}
+        results = await scraper.get_results(max_results=50)
 
-        try:
-            results = await scraper.get_results(max_results=50)
+        if team_filter:
+            results = [
+                r for r in results
+                if team_filter.lower() in r["team1"].lower()
+                or team_filter.lower() in r["team2"].lower()
+            ]
 
-            if team_filter:
-                results = [
-                    r for r in results
-                    if team_filter.lower() in r["team1"].lower()
-                    or team_filter.lower() in r["team2"].lower()
-                ]
+        if not results:
+            msg = f"未找到{' ' + team_filter + ' 的' if team_filter else ''}比赛结果"
+            return {"success": True, "content": msg}
 
-            if not results:
-                msg = f"未找到{' ' + team_filter + ' 的' if team_filter else ''}比赛结果"
-                return {"success": True, "content": msg}
+        results = results[:max_results]
 
-            results = results[:max_results]
+        content = f"最近比赛结果 ({len(results)} 场):\n\n"
+        for i, r in enumerate(results, 1):
+            winner_mark = "[胜]" if r["score1"] > r["score2"] else ""
+            loser_mark = "[胜]" if r["score2"] > r["score1"] else ""
+            content += f"{i}. {winner_mark}{r['team1']} {r['score1']}-{r['score2']} {r['team2']}{loser_mark}\n"
+            if r["event"]:
+                content += f"   赛事: {r['event'][:40]}\n"
+            content += "\n"
 
-            content = f"最近比赛结果 ({len(results)} 场):\n\n"
-            for i, r in enumerate(results, 1):
-                winner_mark = "[胜]" if r["score1"] > r["score2"] else ""
-                loser_mark = "[胜]" if r["score2"] > r["score1"] else ""
-                content += f"{i}. {winner_mark}{r['team1']} {r['score1']}-{r['score2']} {r['team2']}{loser_mark}\n"
-                if r["event"]:
-                    content += f"   赛事: {r['event'][:40]}\n"
-                content += "\n"
-
-            return {"success": True, "content": content.strip()}
-        except Exception as e:
-            self.ctx.logger.error(f"获取比赛结果失败: {e}")
-            return {"success": False, "content": f"获取比赛结果失败: {e}"}
+        return {"success": True, "content": content.strip()}
 
     @Tool(
         "hltv_get_rankings",
@@ -457,27 +458,21 @@ class CS2HLTVPlugin(MaiBotPlugin):
             ToolParameterInfo(name="max_teams", param_type=ToolParamType.INTEGER, description="返回的战队数量，默认10", required=False, default=10),
         ],
     )
+    @_tool_guard("获取排名失败")
     async def get_rankings(self, max_teams: int = 10, **kwargs):
         """获取战队排名"""
-        if not HAS_DEPENDENCIES:
-            return {"success": False, "content": "HLTV 爬虫依赖未安装"}
+        teams = await scraper.get_rankings(max_teams=max_teams)
 
-        try:
-            teams = await scraper.get_rankings(max_teams=max_teams)
+        if not teams:
+            return {"success": False, "content": "未获取到排名数据"}
 
-            if not teams:
-                return {"success": False, "content": "未获取到排名数据"}
+        content = f"CS2 战队世界排名 (Top {len(teams)}):\n\n"
+        for team in teams:
+            content += f"#{team.rank} {team.name} - {team.points}分 ({team.change})\n"
+            if team.players:
+                content += f"   选手: {', '.join(team.players[:5])}\n"
 
-            content = f"CS2 战队世界排名 (Top {len(teams)}):\n\n"
-            for team in teams:
-                content += f"#{team.rank} {team.name} - {team.points}分 ({team.change})\n"
-                if team.players:
-                    content += f"   选手: {', '.join(team.players[:5])}\n"
-
-            return {"success": True, "content": content.strip()}
-        except Exception as e:
-            self.ctx.logger.error(f"获取排名失败: {e}")
-            return {"success": False, "content": f"获取排名失败: {e}"}
+        return {"success": True, "content": content.strip()}
 
     @Tool(
         "hltv_get_team_info",
@@ -486,64 +481,52 @@ class CS2HLTVPlugin(MaiBotPlugin):
             ToolParameterInfo(name="team_name", param_type=ToolParamType.STRING, description="战队名称", required=True),
         ],
     )
+    @_tool_guard("获取战队信息失败")
     async def get_team_info(self, team_name: str = "", **kwargs):
         """获取战队信息"""
         if not team_name:
             return {"success": False, "content": "请提供战队名称"}
 
-        if not HAS_DEPENDENCIES:
-            return {"success": False, "content": "HLTV 爬虫依赖未安装"}
+        team = await asyncio.wait_for(
+            scraper.search_team(team_name),
+            timeout=TEAM_INFO_STEP_TIMEOUT_SECONDS,
+        )
+        if not team:
+            return {"success": False, "content": f"未找到战队: {team_name}"}
 
-        try:
-            team = await asyncio.wait_for(
-                scraper.search_team(team_name),
-                timeout=TEAM_INFO_STEP_TIMEOUT_SECONDS,
-            )
-            if not team:
-                return {"success": False, "content": f"未找到战队: {team_name}"}
+        content = f"{team.name} 战队信息\n\n"
+        if team.rank > 0:
+            content += f"世界排名: #{team.rank}\n"
+        else:
+            content += "世界排名: 未上榜\n"
+        if team.points > 0:
+            content += f"积分: {team.points}\n"
+        if team.change:
+            content += f"排名变化: {team.change}\n"
 
-            content = f"{team.name} 战队信息\n\n"
-            if team.rank > 0:
-                content += f"世界排名: #{team.rank}\n"
-            else:
-                content += "世界排名: 未上榜\n"
-            if team.points > 0:
-                content += f"积分: {team.points}\n"
-            if team.change:
-                content += f"排名变化: {team.change}\n"
+        if team.players:
+            content += f"\n选手阵容:\n"
+            for p in team.players:
+                content += f"  - {p}\n"
 
-            if team.players:
-                content += f"\n选手阵容:\n"
-                for p in team.players:
-                    content += f"  - {p}\n"
+        # 获取近期比赛
+        results = await asyncio.wait_for(
+            scraper.get_results(max_results=20),
+            timeout=TEAM_INFO_STEP_TIMEOUT_SECONDS,
+        )
+        team_results = [
+            r for r in results
+            if team_name.lower() in r["team1"].lower() or team_name.lower() in r["team2"].lower()
+        ][:5]
 
-            # 获取近期比赛
-            results = await asyncio.wait_for(
-                scraper.get_results(max_results=20),
-                timeout=TEAM_INFO_STEP_TIMEOUT_SECONDS,
-            )
-            team_results = [
-                r for r in results
-                if team_name.lower() in r["team1"].lower() or team_name.lower() in r["team2"].lower()
-            ][:5]
+        if team_results:
+            content += f"\n近期战绩:\n"
+            for r in team_results:
+                result_icon = "[胜]" if r["winner"].lower() == team.name.lower() else "[负]"
+                opponent = r['team2'] if team.name.lower() in r['team1'].lower() else r['team1']
+                content += f"  {result_icon} vs {opponent} ({r['score1']}-{r['score2']})\n"
 
-            if team_results:
-                content += f"\n近期战绩:\n"
-                for r in team_results:
-                    result_icon = "[胜]" if r["winner"].lower() == team.name.lower() else "[负]"
-                    opponent = r['team2'] if team.name.lower() in r['team1'].lower() else r['team1']
-                    content += f"  {result_icon} vs {opponent} ({r['score1']}-{r['score2']})\n"
-
-            return {"success": True, "content": content.strip()}
-        except asyncio.TimeoutError:
-            self.ctx.logger.warning(f"战队信息查询超时: {team_name}")
-            return {"success": False, "content": "战队信息查询超时，请稍后重试"}
-        except TeamSearchError as e:
-            self.ctx.logger.warning(f"战队查询通道失败: {e}")
-            return {"success": False, "content": f"战队查询失败，请稍后重试: {e}"}
-        except Exception as e:
-            self.ctx.logger.error(f"获取战队信息失败: {e}")
-            return {"success": False, "content": f"获取战队信息失败: {e}"}
+        return {"success": True, "content": content.strip()}
 
     @Tool(
         "hltv_get_live_matches",
@@ -552,47 +535,41 @@ class CS2HLTVPlugin(MaiBotPlugin):
             ToolParameterInfo(name="team_filter", param_type=ToolParamType.STRING, description="按战队名称过滤（可选）", required=False),
         ],
     )
+    @_tool_guard("获取直播比赛失败")
     async def get_live_matches(self, team_filter: str = "", **kwargs):
         """获取正在进行的比赛"""
-        if not HAS_DEPENDENCIES:
-            return {"success": False, "content": "HLTV 爬虫依赖未安装"}
+        live_matches = await self._live_manager.get_live_matches()
 
-        try:
-            live_matches = await self._live_manager.get_live_matches()
+        if team_filter:
+            live_matches = [
+                m for m in live_matches
+                if team_filter.lower() in m.team1.lower() or team_filter.lower() in m.team2.lower()
+            ]
 
+        if not live_matches:
+            msg = "当前没有正在进行的比赛"
             if team_filter:
-                live_matches = [
-                    m for m in live_matches
-                    if team_filter.lower() in m.team1.lower() or team_filter.lower() in m.team2.lower()
-                ]
+                msg += f"（{team_filter} 相关）"
+            return {"success": True, "content": msg}
 
-            if not live_matches:
-                msg = "当前没有正在进行的比赛"
-                if team_filter:
-                    msg += f"（{team_filter} 相关）"
-                return {"success": True, "content": msg}
+        source_info = f" [数据源: {self._live_manager.provider_type}]" if self._live_manager.is_enabled else ""
 
-            source_info = f" [数据源: {self._live_manager.provider_type}]" if self._live_manager.is_enabled else ""
+        content = f"正在进行的比赛 ({len(live_matches)} 场){source_info}:\n\n"
+        for m in live_matches:
+            content += f"{m.team1} vs {m.team2}\n"
+            content += f"   地图比分: {m.team1_map_score} - {m.team2_map_score}"
+            if m.format:
+                content += f" ({m.format.upper()})"
+            content += "\n"
+            if m.current_map:
+                content += f"   当前地图: {m.current_map}\n"
+            if m.team1_round_score or m.team2_round_score:
+                content += f"   回合比分: {m.team1_round_score} - {m.team2_round_score}\n"
+            if m.event:
+                content += f"   赛事: {m.event}\n"
+            content += "\n"
 
-            content = f"正在进行的比赛 ({len(live_matches)} 场){source_info}:\n\n"
-            for m in live_matches:
-                content += f"{m.team1} vs {m.team2}\n"
-                content += f"   地图比分: {m.team1_map_score} - {m.team2_map_score}"
-                if m.format:
-                    content += f" ({m.format.upper()})"
-                content += "\n"
-                if m.current_map:
-                    content += f"   当前地图: {m.current_map}\n"
-                if m.team1_round_score or m.team2_round_score:
-                    content += f"   回合比分: {m.team1_round_score} - {m.team2_round_score}\n"
-                if m.event:
-                    content += f"   赛事: {m.event}\n"
-                content += "\n"
-
-            return {"success": True, "content": content.strip()}
-        except Exception as e:
-            self.ctx.logger.error(f"获取直播比赛失败: {e}")
-            return {"success": False, "content": f"获取直播比赛失败: {e}"}
+        return {"success": True, "content": content.strip()}
 
     @Tool(
         "hltv_get_live_score",
@@ -601,55 +578,49 @@ class CS2HLTVPlugin(MaiBotPlugin):
             ToolParameterInfo(name="team_name", param_type=ToolParamType.STRING, description="战队名称", required=True),
         ],
     )
+    @_tool_guard("获取实时比分失败")
     async def get_live_score(self, team_name: str = "", **kwargs):
         """获取实时比分"""
         if not team_name:
             return {"success": False, "content": "请提供战队名称"}
 
-        if not HAS_DEPENDENCIES:
-            return {"success": False, "content": "HLTV 爬虫依赖未安装"}
+        live_matches = await self._live_manager.get_live_matches()
 
-        try:
-            live_matches = await self._live_manager.get_live_matches()
+        target_match = None
+        for m in live_matches:
+            if team_name.lower() in m.team1.lower() or team_name.lower() in m.team2.lower():
+                target_match = m
+                break
 
-            target_match = None
-            for m in live_matches:
-                if team_name.lower() in m.team1.lower() or team_name.lower() in m.team2.lower():
-                    target_match = m
-                    break
+        if not target_match:
+            return {"success": True, "content": f"{team_name} 当前没有正在进行的比赛"}
 
-            if not target_match:
-                return {"success": True, "content": f"{team_name} 当前没有正在进行的比赛"}
+        source_info = f" [{self._live_manager.provider_type}]" if self._live_manager.is_enabled else ""
+        content = f"实时比分{source_info}\n\n"
+        content += f"{target_match.team1} vs {target_match.team2}\n"
+        content += f"{'=' * 20}\n"
+        content += f"地图: {target_match.team1_map_score} - {target_match.team2_map_score}"
+        if target_match.format:
+            content += f" ({target_match.format.upper()})"
+        content += "\n"
 
-            source_info = f" [{self._live_manager.provider_type}]" if self._live_manager.is_enabled else ""
-            content = f"实时比分{source_info}\n\n"
-            content += f"{target_match.team1} vs {target_match.team2}\n"
-            content += f"{'=' * 20}\n"
-            content += f"地图: {target_match.team1_map_score} - {target_match.team2_map_score}"
-            if target_match.format:
-                content += f" ({target_match.format.upper()})"
-            content += "\n"
+        if target_match.current_map:
+            content += f"当前: {target_match.current_map}\n"
 
-            if target_match.current_map:
-                content += f"当前: {target_match.current_map}\n"
+        if target_match.team1_round_score or target_match.team2_round_score:
+            content += f"回合: {target_match.team1_round_score} - {target_match.team2_round_score}\n"
 
-            if target_match.team1_round_score or target_match.team2_round_score:
-                content += f"回合: {target_match.team1_round_score} - {target_match.team2_round_score}\n"
+        if target_match.team1_map_score > target_match.team2_map_score:
+            content += f"{target_match.team1} 领先\n"
+        elif target_match.team2_map_score > target_match.team1_map_score:
+            content += f"{target_match.team2} 领先\n"
+        else:
+            content += f"比分持平\n"
 
-            if target_match.team1_map_score > target_match.team2_map_score:
-                content += f"{target_match.team1} 领先\n"
-            elif target_match.team2_map_score > target_match.team1_map_score:
-                content += f"{target_match.team2} 领先\n"
-            else:
-                content += f"比分持平\n"
+        content += f"{'=' * 20}\n"
+        content += f"赛事: {target_match.event}"
 
-            content += f"{'=' * 20}\n"
-            content += f"赛事: {target_match.event}"
-
-            return {"success": True, "content": content}
-        except Exception as e:
-            self.ctx.logger.error(f"获取实时比分失败: {e}")
-            return {"success": False, "content": f"获取实时比分失败: {e}"}
+        return {"success": True, "content": content}
 
 
 def create_plugin() -> CS2HLTVPlugin:
